@@ -26,5 +26,20 @@ class StreamReducerTest {
         assertThat(state.completed).isTrue()
         assertThat(state.error).isEqualTo("连接中断")
     }
+
+    @Test
+    fun `accumulates chunked and parallel tool call deltas in index order`() {
+        val state = StreamSnapshot()
+            .reduce(GenerationEvent.ToolCallDelta(index = 0, id = "call_1", name = "get_weather", argumentsDelta = "{\"city\":"))
+            .reduce(GenerationEvent.ToolCallDelta(index = 1, id = "call_2", name = "search_memories", argumentsDelta = "{\"query\":\"咖啡\"}"))
+            .reduce(GenerationEvent.ToolCallDelta(index = 0, argumentsDelta = "\"苏州\"}"))
+            .reduce(GenerationEvent.Completed)
+
+        assertThat(state.completed).isTrue()
+        assertThat(state.toolCalls).containsExactly(
+            ToolCall(id = "call_1", name = "get_weather", argumentsJson = """{"city":"苏州"}"""),
+            ToolCall(id = "call_2", name = "search_memories", argumentsJson = """{"query":"咖啡"}"""),
+        ).inOrder()
+    }
 }
 

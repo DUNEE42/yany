@@ -245,6 +245,76 @@ class DeepSeekApiTest {
         assertThat(failure.message).doesNotContain("reflection")
     }
 
+    @Test
+    fun `serializes tools and tool result turns and parses streamed tool call deltas`() = runBlocking {
+        server.enqueue(
+            MockResponse()
+                .setHeader("Content-Type", "text/event-stream")
+                .setBody(
+                    """
+                    data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\"city\":"}}]}}]}
+
+                    data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"苏州\"}"}}]}}]}
+
+                    data: [DONE]
+
+                    """.trimIndent() + "\n\n",
+                ),
+        )
+
+        val events = withTimeout(5_000) {
+            api.stream(
+                request().copy(
+                    context = listOf(
+                        ContextTurn(id = "u1", role = "user", content = "苏州冷吗", sequence = 1),
+                        ContextTurn(
+                            id = "a1",
+                            role = "assistant",
+                            content = "",
+                            sequence = 2,
+                            toolCalls = listOf(
+                                com.xinyu.companion.domain.ToolCall(
+                                    id = "call_prev",
+                                    name = "search_memories",
+                                    argumentsJson = """{"query":"苏州"}""",
+                                ),
+                            ),
+                        ),
+                        ContextTurn(
+                            id = "t1",
+                            role = "tool",
+                            content = "记忆内容",
+                            sequence = 3,
+                            toolCallId = "call_prev",
+                            toolName = "search_memories",
+                        ),
+                    ),
+                    tools = listOf(
+                        com.xinyu.companion.domain.ToolDefinition(
+                            name = "get_weather",
+                            description = "查询实时天气",
+                            parametersJsonSchema = """{"type":"object","properties":{"city":{"type":"string"}}}""",
+                        ),
+                    ),
+                    toolChoice = "auto",
+                ),
+            ).toList()
+        }
+
+        val sentBody = server.takeRequest().body.readUtf8()
+        assertThat(sentBody).contains("\"tools\"")
+        assertThat(sentBody).contains("\"tool_choice\":\"auto\"")
+        assertThat(sentBody).contains("\"tool_call_id\":\"call_prev\"")
+        assertThat(sentBody).contains("\"tool_calls\"")
+
+        val toolDeltas = events.filterIsInstance<GenerationEvent.ToolCallDelta>()
+        assertThat(toolDeltas).hasSize(2)
+        assertThat(toolDeltas[0].name).isEqualTo("get_weather")
+        assertThat(toolDeltas[0].argumentsDelta + toolDeltas[1].argumentsDelta)
+            .isEqualTo("""{"city":"苏州"}""")
+        assertThat(events.last()).isEqualTo(GenerationEvent.Completed)
+    }
+
     private fun request() = ChatRequest(
         context = listOf(
             ContextTurn(

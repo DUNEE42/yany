@@ -146,6 +146,47 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideReminderPermissionChecker(
+        @ApplicationContext context: Context,
+    ): com.xinyu.companion.domain.reminder.ReminderPermissionChecker =
+        com.xinyu.companion.data.reminder.AndroidReminderPermissionChecker(context)
+
+    @Provides
+    @Singleton
+    fun provideToolRegistry(
+        memoryStore: MemoryStore,
+        perceptionSettingsStore: PerceptionSettingsStore,
+        networkLocationProvider: CoarseNetworkLocationProvider,
+        weatherProvider: WeatherProvider,
+        webSearchProvider: WebSearchProvider,
+        reminderCoordinator: com.xinyu.companion.domain.reminder.ReminderCoordinator,
+        reminderPermissionChecker: com.xinyu.companion.domain.reminder.ReminderPermissionChecker,
+        json: Json,
+    ): com.xinyu.companion.domain.tools.ToolRegistry =
+        com.xinyu.companion.domain.tools.ToolRegistry(
+            listOf(
+                com.xinyu.companion.domain.tools.MemorySearchTool(memoryStore, json),
+                com.xinyu.companion.domain.tools.WeatherTool(
+                    settingsStore = perceptionSettingsStore,
+                    networkLocationProvider = networkLocationProvider,
+                    weatherProvider = weatherProvider,
+                    json = json,
+                ),
+                com.xinyu.companion.domain.tools.WebSearchTool(
+                    settingsStore = perceptionSettingsStore,
+                    searchProvider = webSearchProvider,
+                    json = json,
+                ),
+                com.xinyu.companion.domain.tools.LocalReminderTool(
+                    coordinator = reminderCoordinator,
+                    permissionChecker = reminderPermissionChecker,
+                    json = json,
+                ),
+            ),
+        )
+
+    @Provides
+    @Singleton
     fun provideMemoryStore(repository: MemoryRepository): MemoryStore = repository
 
     @Provides

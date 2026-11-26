@@ -8,27 +8,42 @@ import com.xinyu.companion.domain.memory.MemoryContextProvider
 import com.xinyu.companion.domain.memory.MemoryWorkCoordinator
 import com.xinyu.companion.domain.perception.PerceptionContextProvider
 import com.xinyu.companion.domain.perception.PerceptionPromptContext
+import com.xinyu.companion.domain.perception.PerceptionQueryPolicy
+import com.xinyu.companion.domain.perception.WebSearchResponse
 import com.xinyu.companion.domain.provider.ChatProvider
 import com.xinyu.companion.domain.provider.ChatRequest
 import com.xinyu.companion.domain.repository.ChatConversationStore
 import com.xinyu.companion.domain.settings.ChatStyleStore
 import com.xinyu.companion.domain.settings.ProviderSettingsStore
+import com.xinyu.companion.domain.tools.ToolExecutionContext
+import com.xinyu.companion.domain.tools.ToolExecutionResult
+import com.xinyu.companion.domain.tools.ToolRegistry
+import com.xinyu.companion.domain.tools.ToolResultSanitizer
+import com.xinyu.companion.domain.tools.WebSearchTool
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.TimeoutCancellationException
+
+data class PendingToolSearch(
+    val suggestedQuery: String,
+    val error: String? = null,
+)
 
 data class ChatEngineState(
     val isStreaming: Boolean = false,
@@ -36,10 +51,11 @@ data class ChatEngineState(
     val safetyLevel: String = "normal",
     val retryableAssistantMessageId: String? = null,
     val liveContextLabel: String? = null,
+    val pendingToolSearch: PendingToolSearch? = null,
 )
 
 @Singleton
-class ChatEngine @Inject constructor(
+class ChatEngine internal constructor(
     private val store: ChatConversationStore,
     private val provider: ChatProvider,
     private val settingsStore: ProviderSettingsStore,
@@ -50,13 +66,83 @@ class ChatEngine @Inject constructor(
     private val perceptionContextProvider: PerceptionContextProvider,
     private val safetyPolicy: SafetyPolicy,
     private val diagnostics: DiagnosticSink,
+    private val toolRegistry: ToolRegistry,
+    private val maxToolSteps: Int,
+    private val toolTimeoutMs: Long,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     @ApplicationScope private val scope: CoroutineScope,
 ) {
+    @Inject
+    constructor(
+        store: ChatConversationStore,
+        provider: ChatProvider,
+        settingsStore: ProviderSettingsStore,
+        styleStore: ChatStyleStore,
+        contextAssembler: ContextAssembler,
+        memoryContextProvider: MemoryContextProvider,
+        memoryCoordinator: MemoryWorkCoordinator,
+        perceptionContextProvider: PerceptionContextProvider,
+        safetyPolicy: SafetyPolicy,
+        diagnostics: DiagnosticSink,
+        toolRegistry: ToolRegistry,
+        @IoDispatcher ioDispatcher: CoroutineDispatcher,
+        @ApplicationScope scope: CoroutineScope,
+    ) : this(
+        store = store,
+        provider = provider,
+        settingsStore = settingsStore,
+        styleStore = styleStore,
+        contextAssembler = contextAssembler,
+        memoryContextProvider = memoryContextProvider,
+        memoryCoordinator = memoryCoordinator,
+        perceptionContextProvider = perceptionContextProvider,
+        safetyPolicy = safetyPolicy,
+        diagnostics = diagnostics,
+        toolRegistry = toolRegistry,
+        maxToolSteps = DEFAULT_MAX_TOOL_STEPS,
+        toolTimeoutMs = DEFAULT_TOOL_TIMEOUT_MS,
+        ioDispatcher = ioDispatcher,
+        scope = scope,
+    )
+
+    constructor(
+        store: ChatConversationStore,
+        provider: ChatProvider,
+        settingsStore: ProviderSettingsStore,
+        styleStore: ChatStyleStore,
+        contextAssembler: ContextAssembler,
+        memoryContextProvider: MemoryContextProvider,
+        memoryCoordinator: MemoryWorkCoordinator,
+        perceptionContextProvider: PerceptionContextProvider,
+        safetyPolicy: SafetyPolicy,
+        diagnostics: DiagnosticSink,
+        ioDispatcher: CoroutineDispatcher,
+        scope: CoroutineScope,
+    ) : this(
+        store = store,
+        provider = provider,
+        settingsStore = settingsStore,
+        styleStore = styleStore,
+        contextAssembler = contextAssembler,
+        memoryContextProvider = memoryContextProvider,
+        memoryCoordinator = memoryCoordinator,
+        perceptionContextProvider = perceptionContextProvider,
+        safetyPolicy = safetyPolicy,
+        diagnostics = diagnostics,
+        toolRegistry = ToolRegistry.EMPTY,
+        maxToolSteps = DEFAULT_MAX_TOOL_STEPS,
+        toolTimeoutMs = DEFAULT_TOOL_TIMEOUT_MS,
+        ioDispatcher = ioDispatcher,
+        scope = scope,
+    )
+
     private val running = AtomicBoolean(false)
     private val runSequence = AtomicLong(0)
     private val activeRun = AtomicLong(0)
     private var activeJob: Job? = null
+
+    @Volatile
+    private var pendingSearchDeferred: CompletableDeferred<String?>? = null
 
     private val mutableState = MutableStateFlow(ChatEngineState())
     val state: StateFlow<ChatEngineState> = mutableState
@@ -102,7 +188,36 @@ class ChatEngine @Inject constructor(
         return true
     }
 
+    fun approveToolSearch(query: String): Boolean {
+        val normalized = PerceptionQueryPolicy.normalizeConfirmedSearchQuery(query)
+        if (normalized == null) {
+            mutableState.update { current ->
+                val pending = current.pendingToolSearch ?: return@update current
+                current.copy(
+                    pendingToolSearch = pending.copy(
+                        error = "搜索词不能为空，也不能包含验证码、证件号或银行卡等敏感字段",
+                    ),
+                )
+            }
+            return false
+        }
+        val deferred = pendingSearchDeferred ?: return false
+        pendingSearchDeferred = null
+        mutableState.update { it.copy(pendingToolSearch = null) }
+        deferred.complete(normalized)
+        return true
+    }
+
+    fun rejectToolSearch() {
+        val deferred = pendingSearchDeferred
+        pendingSearchDeferred = null
+        mutableState.update { it.copy(pendingToolSearch = null) }
+        deferred?.complete(null)
+    }
+
     fun stop() {
+        pendingSearchDeferred?.cancel()
+        pendingSearchDeferred = null
         activeJob?.cancel()
     }
 
@@ -141,8 +256,6 @@ class ChatEngine @Inject constructor(
         var turn: ChatTurn? = null
         var snapshot = StreamSnapshot()
         var finalStatus = MessageStatus.FAILED
-        var lastSavedText = ""
-        var lastSavedAt = 0L
         var diagnosticModel = "unknown"
 
         try {
@@ -192,7 +305,7 @@ class ChatEngine @Inject constructor(
                 conversationId = conversationId,
                 query = turn.user.content,
             )
-            val context = contextAssembler.assemble(
+            val baseContext = contextAssembler.assemble(
                 companion = companion,
                 memoryContext = memoryContext,
                 messages = history,
@@ -202,26 +315,100 @@ class ChatEngine @Inject constructor(
                 perceptionContext = perceptionContext,
             )
 
-            provider.stream(
-                ChatRequest(
-                    context = context,
-                    config = config,
-                    conversationStyle = conversationStyle,
-                ),
-            ).collect { event ->
-                snapshot = snapshot.reduce(event)
-                if (event is GenerationEvent.Delta) {
-                    if (System.currentTimeMillis() - lastSavedAt >= SAVE_INTERVAL_MS &&
-                        snapshot.text != lastSavedText
-                    ) {
-                        store.updateMessage(
-                            id = turn.assistant.id,
-                            content = snapshot.text,
-                            status = MessageStatus.STREAMING,
+            val workingContext = baseContext.toMutableList()
+            val toolsEnabled = provider.capabilities.tools &&
+                !toolRegistry.isEmpty() &&
+                safety.level != "crisis"
+            var toolStepsUsed = 0
+            var latestSearchResponse: WebSearchResponse? = perceptionContext.search
+            var usedWeather = perceptionContext.weather != null
+            var remainingPreApprovedSearchQuery = approvedSearchQuery
+            var syntheticSeq = (workingContext.maxOfOrNull { it.sequence } ?: 0L) + 1L
+
+            while (true) {
+                currentCoroutineContext().ensureActive()
+                val allowToolsThisStep = toolsEnabled && toolStepsUsed < maxToolSteps
+                val stepTools = if (allowToolsThisStep) toolRegistry.definitions else emptyList()
+                val stepSnapshot = streamStep(
+                    assistantMessageId = turn.assistant.id,
+                    request = ChatRequest(
+                        context = workingContext.toList(),
+                        config = config,
+                        conversationStyle = conversationStyle,
+                        tools = stepTools,
+                        toolChoice = if (stepTools.isNotEmpty()) "auto" else null,
+                    ),
+                )
+
+                if (stepSnapshot.error != null || !stepSnapshot.completed) {
+                    snapshot = stepSnapshot
+                    break
+                }
+
+                val requestedTools = stepSnapshot.toolCalls
+                if (requestedTools.isEmpty() || !allowToolsThisStep) {
+                    snapshot = stepSnapshot
+                    break
+                }
+
+                toolStepsUsed += 1
+                workingContext += ContextTurn(
+                    id = "tool-assistant-$toolStepsUsed",
+                    role = "assistant",
+                    content = stepSnapshot.text,
+                    sequence = syntheticSeq++,
+                    toolCalls = requestedTools.take(MAX_TOOLS_PER_STEP),
+                )
+
+                for (call in requestedTools.take(MAX_TOOLS_PER_STEP)) {
+                    currentCoroutineContext().ensureActive()
+                    val tool = toolRegistry.find(call.name)
+                    val result = if (tool == null) {
+                        ToolExecutionResult(
+                            content = ToolResultSanitizer.wrapUntrusted(
+                                call.name,
+                                "工具 ${call.name} 不可用，请不要重试该工具。",
+                            ),
                         )
-                        lastSavedText = snapshot.text
-                        lastSavedAt = System.currentTimeMillis()
+                    } else {
+                        mutableState.update { it.copy(liveContextLabel = tool.statusLabel) }
+                        val toolContext = ToolExecutionContext(
+                            companionId = companion.id,
+                            conversationId = conversationId,
+                            userMessage = turn.user.content,
+                            approvedSearchQuery = remainingPreApprovedSearchQuery,
+                            preFetchedSearch = latestSearchResponse,
+                            requestSearchApproval = { suggested ->
+                                awaitToolSearchApproval(suggested)
+                            },
+                        )
+                        executeToolSafely(tool, call.argumentsJson, toolContext).also {
+                            if (tool.definition.name == WebSearchTool.NAME) {
+                                remainingPreApprovedSearchQuery = null
+                            }
+                        }
                     }
+
+                    result.searchResponse?.let { latestSearchResponse = it }
+                    if (result.usedWeather) usedWeather = true
+
+                    workingContext += ContextTurn(
+                        id = "tool-result-${call.id}",
+                        role = "tool",
+                        content = result.content,
+                        sequence = syntheticSeq++,
+                        toolCallId = call.id,
+                        toolName = call.name,
+                    )
+                }
+                mutableState.update {
+                    it.copy(
+                        liveContextLabel = toolResultStatus(
+                            search = latestSearchResponse,
+                            usedWeather = usedWeather,
+                            step = toolStepsUsed,
+                        ),
+                    )
                 }
             }
 
@@ -236,7 +423,11 @@ class ChatEngine @Inject constructor(
             }
             if (snapshot.error == null && snapshot.text.isNotBlank()) {
                 snapshot = snapshot.copy(
-                    text = appendLiveContextSources(snapshot.text, perceptionContext),
+                    text = appendLiveContextSources(
+                        answer = snapshot.text,
+                        search = latestSearchResponse,
+                        usedWeather = usedWeather,
+                    ),
                 )
             }
             if (snapshot.error == null && snapshot.text.isBlank()) {
@@ -267,6 +458,8 @@ class ChatEngine @Inject constructor(
             )
             finalStatus = MessageStatus.FAILED
         } finally {
+            pendingSearchDeferred?.cancel()
+            pendingSearchDeferred = null
             val completedTurn = turn
             var persistenceError: String? = null
             if (completedTurn != null) {
@@ -304,6 +497,7 @@ class ChatEngine @Inject constructor(
                         error = persistenceError
                             ?: if (finalStatus == MessageStatus.FAILED) snapshot.error else null,
                         liveContextLabel = null,
+                        pendingToolSearch = null,
                         retryableAssistantMessageId =
                             if (persistenceError == null &&
                                 finalStatus == MessageStatus.FAILED &&
@@ -325,9 +519,92 @@ class ChatEngine @Inject constructor(
         }
     }
 
+    private suspend fun streamStep(
+        assistantMessageId: String,
+        request: ChatRequest,
+    ): StreamSnapshot {
+        var stepSnapshot = StreamSnapshot()
+        var lastSavedText = ""
+        var lastSavedAt = 0L
+
+        provider.stream(request).collect { event ->
+            stepSnapshot = stepSnapshot.reduce(event)
+            if (event is GenerationEvent.Delta && stepSnapshot.toolCallBuilders.isEmpty()) {
+                if (System.currentTimeMillis() - lastSavedAt >= SAVE_INTERVAL_MS &&
+                    stepSnapshot.text != lastSavedText
+                ) {
+                    store.updateMessage(
+                        id = assistantMessageId,
+                        content = stepSnapshot.text,
+                        status = MessageStatus.STREAMING,
+                    )
+                    lastSavedText = stepSnapshot.text
+                    lastSavedAt = System.currentTimeMillis()
+                }
+            }
+        }
+        return stepSnapshot
+    }
+
+    private suspend fun executeToolSafely(
+        tool: com.xinyu.companion.domain.tools.CompanionTool,
+        argumentsJson: String,
+        context: ToolExecutionContext,
+    ): ToolExecutionResult {
+        return try {
+            if (tool.definition.name == WebSearchTool.NAME) {
+                tool.execute(argumentsJson, context)
+            } else {
+                withTimeout(toolTimeoutMs) {
+                    withContext(ioDispatcher) {
+                        tool.execute(argumentsJson, context)
+                    }
+                }
+            }
+        } catch (_: TimeoutCancellationException) {
+            ToolExecutionResult(
+                content = ToolResultSanitizer.wrapUntrusted(
+                    tool.definition.name,
+                    "工具 ${tool.definition.name} 执行超时，请不要编造结果。",
+                ),
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Throwable) {
+            ToolExecutionResult(
+                content = ToolResultSanitizer.wrapUntrusted(
+                    tool.definition.name,
+                    "工具执行失败：${error.message ?: "未知错误"}",
+                ),
+            )
+        }
+    }
+
+    private suspend fun awaitToolSearchApproval(suggestedQuery: String): String? {
+        val deferred = CompletableDeferred<String?>()
+        pendingSearchDeferred = deferred
+        mutableState.update {
+            it.copy(
+                liveContextLabel = "等待你确认联网搜索词",
+                pendingToolSearch = PendingToolSearch(suggestedQuery = suggestedQuery),
+            )
+        }
+        return try {
+            deferred.await()
+        } finally {
+            if (pendingSearchDeferred === deferred) {
+                pendingSearchDeferred = null
+            }
+            mutableState.update { it.copy(pendingToolSearch = null) }
+        }
+    }
+
     private companion object {
         const val SAVE_INTERVAL_MS = 450L
         const val PERCEPTION_TIMEOUT_MS = 30_000L
+        const val DEFAULT_MAX_TOOL_STEPS = 4
+        const val DEFAULT_TOOL_TIMEOUT_MS = 15_000L
+        const val MAX_TOOLS_PER_STEP = 3
 
         fun perceptionStatus(context: PerceptionPromptContext): String? = when {
             context.search != null -> "已联网搜索 ${context.search.results.size} 个来源"
@@ -337,22 +614,33 @@ class ChatEngine @Inject constructor(
             else -> null
         }
 
+        fun toolResultStatus(
+            search: WebSearchResponse?,
+            usedWeather: Boolean,
+            step: Int,
+        ): String = when {
+            search != null -> "已联网搜索 ${search.results.size} 个来源"
+            usedWeather -> "已读取当前天气"
+            else -> "已完成第 $step 步信息整理"
+        }
+
         fun appendLiveContextSources(
             answer: String,
-            context: PerceptionPromptContext,
+            search: WebSearchResponse?,
+            usedWeather: Boolean,
         ): String {
-            if (context.search != null) {
+            if (search != null) {
                 val citedIndexes = Regex("""\[S(\d+)]""")
                     .findAll(answer)
                     .mapNotNull { it.groupValues.getOrNull(1)?.toIntOrNull() }
-                    .filter { it in 1..context.search.results.size }
+                    .filter { it in 1..search.results.size }
                     .distinct()
                     .sorted()
                     .take(5)
                     .toList()
                 if (citedIndexes.isNotEmpty()) {
                     var cleanAnswer = answer
-                    context.search.results.forEachIndexed { index, result ->
+                    search.results.forEachIndexed { index, _ ->
                         cleanAnswer = cleanAnswer.replace("[S${index + 1}]", "[${index + 1}]")
                     }
                     return buildString {
@@ -361,7 +649,7 @@ class ChatEngine @Inject constructor(
                         appendLine()
                         appendLine("参考来源：")
                         citedIndexes.forEach { sourceIndex ->
-                            val result = context.search.results[sourceIndex - 1]
+                            val result = search.results[sourceIndex - 1]
                             append(sourceIndex)
                             append(". ")
                             append(result.title.take(100))
@@ -371,7 +659,7 @@ class ChatEngine @Inject constructor(
                     }.trimEnd()
                 }
             }
-            if (context.weather != null && !answer.contains("Open-Meteo")) {
+            if (usedWeather && !answer.contains("Open-Meteo")) {
                 return answer.trimEnd() + "\n\n天气数据：Open-Meteo"
             }
             return answer
