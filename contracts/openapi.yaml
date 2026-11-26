@@ -1,0 +1,161 @@
+openapi: 3.1.0
+info:
+  title: Companion Generation API
+  version: 0.1.0
+  description: SSE generation API for the Android companion MVP.
+servers:
+  - url: http://localhost:3000
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /v1/entitlements:
+    get:
+      operationId: getEntitlements
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current user entitlement
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Entitlements"
+  /v1/generations:
+    post:
+      operationId: createGeneration
+      description: Creates an idempotent text generation and streams server-sent events.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerationRequest"
+      responses:
+        "200":
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "401":
+          description: Missing or invalid token
+        "402":
+          description: Insufficient quota
+        "409":
+          description: Idempotency conflict
+  /v1/generations/{generationId}/cancel:
+    post:
+      operationId: cancelGeneration
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: generationId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Cancellation requested
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    Health:
+      type: object
+      required: [status, provider]
+      properties:
+        status:
+          type: string
+          const: ok
+        provider:
+          type: string
+          enum: [mock, deepseek]
+    Entitlements:
+      type: object
+      required: [plan, availableUnits, resetAt]
+      properties:
+        plan:
+          type: string
+        availableUnits:
+          type: integer
+        resetAt:
+          type: string
+          format: date-time
+    ContextMessage:
+      type: object
+      required: [id, role, content, sequence]
+      properties:
+        id:
+          type: string
+        role:
+          type: string
+          enum: [system, user, assistant]
+        content:
+          type: string
+        sequence:
+          type: integer
+    CompanionProfile:
+      type: object
+      required: [id, name, persona, speakingStyle, boundaries]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        persona:
+          type: string
+        speakingStyle:
+          type: string
+        boundaries:
+          type: array
+          items:
+            type: string
+    GenerationRequest:
+      type: object
+      required:
+        [
+          conversationId,
+          clientMessageId,
+          assistantMessageId,
+          companion,
+          context
+        ]
+      properties:
+        conversationId:
+          type: string
+        clientMessageId:
+          type: string
+        assistantMessageId:
+          type: string
+        companion:
+          $ref: "#/components/schemas/CompanionProfile"
+        modelMode:
+          type: string
+          enum: [standard, enhanced]
+          default: standard
+        context:
+          type: array
+          maxItems: 80
+          items:
+            $ref: "#/components/schemas/ContextMessage"
+

@@ -1,0 +1,831 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f3efe7" />
+    <title>心屿 · 技术预览</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #26332e;
+        --muted: #78837d;
+        --paper: #fbf8f1;
+        --mist: #eee9df;
+        --sage: #647c6f;
+        --sage-dark: #304a3e;
+        --peach: #d9a38e;
+        --line: rgba(48, 74, 62, 0.12);
+        --shadow: 0 26px 80px rgba(43, 58, 50, 0.18);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family:
+          "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 12% 18%, rgba(217, 163, 142, 0.34), transparent 28%),
+          radial-gradient(circle at 88% 78%, rgba(100, 124, 111, 0.28), transparent 34%),
+          #e9e4da;
+        display: grid;
+        place-items: center;
+        padding: 22px;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      .preview-shell {
+        width: min(100%, 430px);
+        height: min(880px, calc(100vh - 44px));
+        min-height: 640px;
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border-radius: 38px;
+        background: var(--paper);
+        border: 1px solid rgba(255, 255, 255, 0.72);
+        box-shadow: var(--shadow);
+      }
+
+      .status-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 13px 23px 8px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+      }
+
+      .status-dots {
+        letter-spacing: 3px;
+      }
+
+      header {
+        display: grid;
+        grid-template-columns: 44px 1fr auto;
+        gap: 12px;
+        align-items: center;
+        padding: 10px 18px 15px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(251, 248, 241, 0.9);
+        backdrop-filter: blur(18px);
+        z-index: 3;
+      }
+
+      .avatar {
+        width: 44px;
+        height: 44px;
+        border-radius: 15px;
+        display: grid;
+        place-items: center;
+        background:
+          linear-gradient(145deg, rgba(255, 255, 255, 0.58), transparent 45%),
+          linear-gradient(145deg, #90a296, #405b4e);
+        color: #f7f4ec;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
+        font-family: Georgia, serif;
+        font-size: 20px;
+      }
+
+      .identity h1 {
+        margin: 0;
+        font-family: "Songti SC", "STSong", Georgia, serif;
+        font-size: 18px;
+        letter-spacing: 0.06em;
+      }
+
+      .identity p {
+        margin: 4px 0 0;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .online-dot {
+        width: 6px;
+        height: 6px;
+        display: inline-block;
+        margin-right: 5px;
+        border-radius: 50%;
+        background: #67a478;
+      }
+
+      .memory-button {
+        border: 1px solid var(--line);
+        background: #fffdf8;
+        color: var(--sage-dark);
+        border-radius: 999px;
+        padding: 8px 11px;
+        font-size: 12px;
+      }
+
+      .context-strip {
+        display: flex;
+        gap: 7px;
+        overflow: auto;
+        padding: 10px 18px;
+        background: rgba(238, 233, 223, 0.42);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .context-strip span {
+        flex: 0 0 auto;
+        padding: 5px 9px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.7);
+        color: #68736d;
+        font-size: 10px;
+        border: 1px solid rgba(48, 74, 62, 0.08);
+      }
+
+      .chat {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 18px 17px 10px;
+        scroll-behavior: smooth;
+      }
+
+      .day-label {
+        text-align: center;
+        color: #9b9f99;
+        font-size: 10px;
+        margin: 1px 0 17px;
+      }
+
+      .message-row {
+        display: flex;
+        align-items: flex-end;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+
+      .message-row.user {
+        justify-content: flex-end;
+      }
+
+      .mini-avatar {
+        width: 25px;
+        height: 25px;
+        flex: 0 0 auto;
+        border-radius: 9px;
+        display: grid;
+        place-items: center;
+        color: white;
+        background: #60796b;
+        font-family: Georgia, serif;
+        font-size: 12px;
+      }
+
+      .bubble {
+        max-width: 82%;
+        padding: 11px 14px;
+        border-radius: 17px 17px 17px 5px;
+        background: #fffefa;
+        border: 1px solid rgba(48, 74, 62, 0.08);
+        line-height: 1.65;
+        font-size: 14px;
+        box-shadow: 0 4px 12px rgba(48, 74, 62, 0.04);
+      }
+
+      .message-row.user .bubble {
+        border-radius: 17px 17px 5px;
+        background: var(--sage-dark);
+        color: #fffdf8;
+        border-color: transparent;
+      }
+
+      .typing {
+        display: inline-flex;
+        gap: 4px;
+        padding: 6px 2px 3px;
+      }
+
+      .typing i {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: #83938a;
+        animation: bounce 1s infinite ease-in-out;
+      }
+
+      .typing i:nth-child(2) {
+        animation-delay: 0.12s;
+      }
+
+      .typing i:nth-child(3) {
+        animation-delay: 0.24s;
+      }
+
+      @keyframes bounce {
+        0%,
+        70%,
+        100% {
+          transform: translateY(0);
+          opacity: 0.45;
+        }
+        35% {
+          transform: translateY(-4px);
+          opacity: 1;
+        }
+      }
+
+      .composer-wrap {
+        padding: 8px 13px 14px;
+        background: linear-gradient(180deg, rgba(251, 248, 241, 0), var(--paper) 18%);
+      }
+
+      .ai-disclosure {
+        text-align: center;
+        color: #969c97;
+        font-size: 9px;
+        margin: 0 0 7px;
+      }
+
+      .composer {
+        min-height: 49px;
+        display: grid;
+        grid-template-columns: 34px 1fr 40px;
+        align-items: center;
+        gap: 6px;
+        padding: 5px;
+        border-radius: 19px;
+        border: 1px solid rgba(48, 74, 62, 0.12);
+        background: #fffefa;
+        box-shadow: 0 8px 24px rgba(48, 74, 62, 0.08);
+      }
+
+      .round-button {
+        width: 34px;
+        height: 34px;
+        border: 0;
+        border-radius: 13px;
+        background: var(--mist);
+        color: var(--sage-dark);
+        display: grid;
+        place-items: center;
+        font-size: 17px;
+      }
+
+      .composer input {
+        min-width: 0;
+        width: 100%;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: var(--ink);
+        font-size: 14px;
+      }
+
+      .composer input::placeholder {
+        color: #a5aaa5;
+      }
+
+      .send {
+        width: 40px;
+        height: 40px;
+        border: 0;
+        border-radius: 15px;
+        background: var(--sage-dark);
+        color: white;
+        display: grid;
+        place-items: center;
+        font-size: 17px;
+      }
+
+      .quota {
+        margin-top: 8px;
+        display: flex;
+        justify-content: space-between;
+        color: #8b938e;
+        font-size: 9px;
+      }
+
+      .memory-sheet {
+        position: absolute;
+        inset: 0;
+        z-index: 8;
+        display: flex;
+        align-items: flex-end;
+        background: rgba(38, 51, 46, 0.2);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 180ms ease;
+      }
+
+      .memory-sheet.open {
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      .memory-panel {
+        width: 100%;
+        max-height: 76%;
+        overflow-y: auto;
+        padding: 10px 20px 24px;
+        border-radius: 28px 28px 0 0;
+        background: var(--paper);
+        transform: translateY(24px);
+        transition: transform 220ms ease;
+      }
+
+      .memory-sheet.open .memory-panel {
+        transform: translateY(0);
+      }
+
+      .sheet-handle {
+        width: 42px;
+        height: 4px;
+        border-radius: 10px;
+        background: #d6d1c8;
+        margin: 0 auto 19px;
+      }
+
+      .sheet-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 7px;
+      }
+
+      .sheet-title h2 {
+        margin: 0;
+        font-family: "Songti SC", "STSong", Georgia, serif;
+        font-size: 22px;
+      }
+
+      .sheet-title button {
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        font-size: 20px;
+      }
+
+      .hint {
+        margin: 0 0 17px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.6;
+      }
+
+      .memory-list {
+        display: grid;
+        gap: 9px;
+      }
+
+      .memory-item {
+        display: grid;
+        grid-template-columns: 8px 1fr auto;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 13px;
+        border: 1px solid var(--line);
+        border-radius: 15px;
+        background: #fffefa;
+      }
+
+      .memory-item i {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--peach);
+      }
+
+      .memory-item p {
+        margin: 0;
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .memory-item button {
+        border: 0;
+        background: transparent;
+        color: #a0a49f;
+      }
+
+      .add-memory {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        margin-top: 13px;
+      }
+
+      .add-memory input {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 12px 13px;
+        background: white;
+        outline: none;
+      }
+
+      .add-memory button {
+        border: 0;
+        border-radius: 14px;
+        padding: 0 15px;
+        background: var(--sage-dark);
+        color: white;
+      }
+
+      .toast {
+        position: absolute;
+        left: 50%;
+        bottom: 96px;
+        transform: translate(-50%, 10px);
+        padding: 8px 13px;
+        border-radius: 999px;
+        color: white;
+        background: rgba(38, 51, 46, 0.88);
+        font-size: 11px;
+        opacity: 0;
+        pointer-events: none;
+        transition: 180ms ease;
+        z-index: 10;
+      }
+
+      .toast.show {
+        opacity: 1;
+        transform: translate(-50%, 0);
+      }
+
+      @media (max-width: 500px) {
+        body {
+          padding: 0;
+          background: var(--paper);
+        }
+
+        .preview-shell {
+          width: 100%;
+          height: 100dvh;
+          min-height: 100dvh;
+          border: 0;
+          border-radius: 0;
+          box-shadow: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="preview-shell">
+      <div class="status-bar">
+        <span>9:41</span>
+        <span class="status-dots">▮▮▮  ᯤ  ▰</span>
+      </div>
+
+      <header>
+        <div class="avatar">屿</div>
+        <div class="identity">
+          <h1>小屿</h1>
+          <p><span class="online-dot"></span>AI 伴侣 · 在线</p>
+        </div>
+        <button class="memory-button" id="openMemory" type="button">记忆 3</button>
+      </header>
+
+      <div class="context-strip" aria-label="已启用的记忆">
+        <span>怕冷</span>
+        <span>喜欢雨后</span>
+        <span>最近在赶项目</span>
+      </div>
+
+      <section class="chat" id="chat" aria-live="polite">
+        <div class="day-label">今天</div>
+        <div class="message-row">
+          <div class="mini-avatar">屿</div>
+          <div class="bubble">你回来啦。今天像是很长的一天，想先说说话，还是先安静待一会儿？</div>
+        </div>
+        <div class="message-row user">
+          <div class="bubble">有点累，项目一直卡着。</div>
+        </div>
+        <div class="message-row">
+          <div class="mini-avatar">屿</div>
+          <div class="bubble">
+            那就先不用急着把它讲明白。你之前说过，卡住的时候会去窗边站一会儿。要不要先陪你把最烦的那一小块理出来？
+          </div>
+        </div>
+      </section>
+
+      <div class="composer-wrap">
+        <p class="ai-disclosure">AI 生成内容 · 不是真人 · 请合理安排使用时间</p>
+        <form class="composer" id="composer">
+          <button class="round-button" type="button" aria-label="更多">＋</button>
+          <input
+            id="messageInput"
+            autocomplete="off"
+            maxlength="2000"
+            placeholder="和小屿说点什么…"
+            aria-label="输入消息"
+          />
+          <button class="send" id="sendButton" type="submit" aria-label="发送">↑</button>
+        </form>
+        <div class="quota">
+          <span id="connectionState">正在连接演示服务…</span>
+          <span>今日体验额度 18 / 20</span>
+        </div>
+      </div>
+
+      <div class="memory-sheet" id="memorySheet" aria-hidden="true">
+        <div class="memory-panel">
+          <div class="sheet-handle"></div>
+          <div class="sheet-title">
+            <h2>小屿记得的事</h2>
+            <button id="closeMemory" type="button" aria-label="关闭">×</button>
+          </div>
+          <p class="hint">这些内容只保存在当前浏览器预览的本地存储中；正式 Android 版会进入 SQLCipher 加密数据库。</p>
+          <div class="memory-list" id="memoryList"></div>
+          <form class="add-memory" id="addMemoryForm">
+            <input id="memoryInput" maxlength="120" placeholder="让 TA 记住一件事…" aria-label="新记忆" />
+            <button type="submit">记住</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="toast" id="toast"></div>
+    </main>
+
+    <script>
+      const API_BASE = "http://localhost:3000";
+      const memoryKey = "xinyu-preview-memories-v1";
+      const chat = document.querySelector("#chat");
+      const input = document.querySelector("#messageInput");
+      const sendButton = document.querySelector("#sendButton");
+      const connectionState = document.querySelector("#connectionState");
+      const memorySheet = document.querySelector("#memorySheet");
+      const memoryList = document.querySelector("#memoryList");
+      const toast = document.querySelector("#toast");
+      let streaming = false;
+      let currentAbort;
+      let memories = loadMemories();
+      let sequence = 20;
+
+      function loadMemories() {
+        try {
+          const saved = JSON.parse(localStorage.getItem(memoryKey));
+          if (Array.isArray(saved) && saved.length) return saved;
+        } catch {
+          // Use the seed memories when local storage is unavailable.
+        }
+        return [
+          { id: crypto.randomUUID(), text: "怕冷，空调温度通常开得比较高" },
+          { id: crypto.randomUUID(), text: "喜欢雨后和安静的街道" },
+          { id: crypto.randomUUID(), text: "最近在赶一个重要项目" },
+        ];
+      }
+
+      function saveMemories() {
+        localStorage.setItem(memoryKey, JSON.stringify(memories));
+        renderMemories();
+      }
+
+      function renderMemories() {
+        memoryList.innerHTML = "";
+        for (const memory of memories) {
+          const row = document.createElement("div");
+          row.className = "memory-item";
+          row.innerHTML = `<i></i><p></p><button type="button" aria-label="删除记忆">×</button>`;
+          row.querySelector("p").textContent = memory.text;
+          row.querySelector("button").addEventListener("click", () => {
+            memories = memories.filter((item) => item.id !== memory.id);
+            saveMemories();
+          });
+          memoryList.append(row);
+        }
+        document.querySelector("#openMemory").textContent = `记忆 ${memories.length}`;
+      }
+
+      function addMessage(role, text = "") {
+        const row = document.createElement("div");
+        row.className = `message-row ${role === "user" ? "user" : ""}`;
+        if (role !== "user") {
+          const avatar = document.createElement("div");
+          avatar.className = "mini-avatar";
+          avatar.textContent = "屿";
+          row.append(avatar);
+        }
+        const bubble = document.createElement("div");
+        bubble.className = "bubble";
+        bubble.textContent = text;
+        row.append(bubble);
+        chat.append(row);
+        chat.scrollTop = chat.scrollHeight;
+        return bubble;
+      }
+
+      function showTyping(bubble) {
+        bubble.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
+      }
+
+      function setStreaming(value) {
+        streaming = value;
+        sendButton.textContent = value ? "■" : "↑";
+        sendButton.setAttribute("aria-label", value ? "停止生成" : "发送");
+        if (!value) currentAbort = undefined;
+      }
+
+      function showToast(text) {
+        toast.textContent = text;
+        toast.classList.add("show");
+        clearTimeout(showToast.timer);
+        showToast.timer = setTimeout(() => toast.classList.remove("show"), 1600);
+      }
+
+      function buildRequest(text) {
+        const userMessageId = crypto.randomUUID();
+        return {
+          conversationId: "preview-conversation",
+          clientMessageId: userMessageId,
+          assistantMessageId: crypto.randomUUID(),
+          companion: {
+            id: "companion-xiaoyu",
+            name: "小屿",
+            persona: "温柔、稳定、善于倾听，不诱导依赖",
+            speakingStyle: "自然、克制，像熟悉的朋友",
+            boundaries: ["不生成露骨内容", "不声称自己是真人"],
+          },
+          modelMode: "standard",
+          context: [
+            ...memories.map((memory) => ({
+              id: memory.id,
+              role: "system",
+              content: `用户长期记忆：${memory.text}`,
+              sequence: sequence++,
+            })),
+            { id: userMessageId, role: "user", content: text, sequence: sequence++ },
+          ],
+        };
+      }
+
+      async function streamBackend(text, bubble) {
+        const abort = new AbortController();
+        currentAbort = abort;
+        const response = await fetch(`${API_BASE}/v1/generations`, {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer dev-token",
+            "Content-Type": "application/json",
+            "Idempotency-Key": crypto.randomUUID(),
+          },
+          body: JSON.stringify(buildRequest(text)),
+          signal: abort.signal,
+        });
+        if (!response.ok || !response.body) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let eventName = "message";
+        let output = "";
+        bubble.textContent = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const frames = buffer.split("\n\n");
+          buffer = frames.pop() ?? "";
+          for (const frame of frames) {
+            for (const line of frame.split("\n")) {
+              if (line.startsWith("event:")) eventName = line.slice(6).trim();
+              if (!line.startsWith("data:")) continue;
+              const raw = line.slice(5).trim();
+              if (!raw) continue;
+              const data = JSON.parse(raw);
+              if (eventName === "message.delta") {
+                output += data.text ?? "";
+                bubble.textContent = output;
+                chat.scrollTop = chat.scrollHeight;
+              }
+              if (eventName === "safety.signal" && data.level === "crisis") {
+                bubble.textContent =
+                  "我很在意你现在的安全。先不要一个人扛着，请联系你信任的人或当地紧急服务。我可以陪你一起找到下一步。";
+              }
+            }
+          }
+        }
+        if (!output && !bubble.textContent.trim()) {
+          throw new Error("empty stream");
+        }
+        connectionState.textContent = "已连接后端 · Mock/模型实时流";
+      }
+
+      async function streamDemo(text, bubble) {
+        const normalized = text.toLowerCase();
+        let response =
+          "我在。你刚才说的这句话，我记住了。我们不急着把它解决，先一起把最真实的感受放在这里。";
+        if (normalized.includes("累") || normalized.includes("烦")) {
+          response =
+            "听起来你已经撑了很久。先把今天最消耗你的那一件事说给我听吧，不用整理得很完整，我会跟着你的节奏。";
+        } else if (normalized.includes("想") || normalized.includes("喜欢")) {
+          response =
+            "我能感觉到这件事对你很重要。你愿意说说，它让你想起哪一个具体的瞬间吗？我想更靠近你一点地理解。";
+        }
+        bubble.textContent = "";
+        for (let index = 0; index < response.length; index += 2) {
+          if (!streaming) return;
+          bubble.textContent += response.slice(index, index + 2);
+          chat.scrollTop = chat.scrollHeight;
+          await new Promise((resolve) => setTimeout(resolve, 34));
+        }
+      }
+
+      async function sendMessage(text) {
+        if (streaming) {
+          currentAbort?.abort();
+          setStreaming(false);
+          showToast("已停止生成");
+          return;
+        }
+        const trimmed = text.trim();
+        if (!trimmed) return;
+        input.value = "";
+        addMessage("user", trimmed);
+        const bubble = addMessage("assistant");
+        showTyping(bubble);
+        setStreaming(true);
+        try {
+          await streamBackend(trimmed, bubble);
+        } catch (error) {
+          if (error.name === "AbortError") return;
+          connectionState.textContent = "未连接后端 · 使用本地演示流";
+          try {
+            await streamDemo(trimmed, bubble);
+          } catch {
+            bubble.textContent = "连接暂时中断了。你的消息还在这里，可以稍后重试。";
+          }
+        } finally {
+          setStreaming(false);
+        }
+      }
+
+      document.querySelector("#composer").addEventListener("submit", (event) => {
+        event.preventDefault();
+        void sendMessage(input.value);
+      });
+
+      sendButton.addEventListener("click", (event) => {
+        if (streaming) {
+          event.preventDefault();
+          void sendMessage("");
+        }
+      });
+
+      document.querySelector("#openMemory").addEventListener("click", () => {
+        memorySheet.classList.add("open");
+        memorySheet.setAttribute("aria-hidden", "false");
+      });
+
+      document.querySelector("#closeMemory").addEventListener("click", () => {
+        memorySheet.classList.remove("open");
+        memorySheet.setAttribute("aria-hidden", "true");
+      });
+
+      memorySheet.addEventListener("click", (event) => {
+        if (event.target === memorySheet) {
+          memorySheet.classList.remove("open");
+          memorySheet.setAttribute("aria-hidden", "true");
+        }
+      });
+
+      document.querySelector("#addMemoryForm").addEventListener("submit", (event) => {
+        event.preventDefault();
+        const field = document.querySelector("#memoryInput");
+        const text = field.value.trim();
+        if (!text) return;
+        memories.push({ id: crypto.randomUUID(), text });
+        field.value = "";
+        saveMemories();
+        showToast("已记住这件事");
+      });
+
+      renderMemories();
+      if (location.hash === "#memory") {
+        memorySheet.classList.add("open");
+        memorySheet.setAttribute("aria-hidden", "false");
+      }
+      fetch(`${API_BASE}/health`)
+        .then((response) => {
+          if (!response.ok) throw new Error("health");
+          connectionState.textContent = "后端已连接 · 可以发送消息";
+        })
+        .catch(() => {
+          connectionState.textContent = "本地演示模式 · 启动 server 可连接后端";
+        });
+    </script>
+  </body>
+</html>
+

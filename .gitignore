@@ -1,0 +1,32 @@
+# Node
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+
+# Android
+.gradle/
+.kotlin/
+local.properties
+**/build/
+*.apk
+*.aab
+*.jks
+*.keystore
+*.hprof
+*.hprof.*
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local artifacts
+artifacts/
+
