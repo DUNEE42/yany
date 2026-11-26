@@ -21,17 +21,26 @@ data class ReminderUiState(
     val isSaving: Boolean = false,
     val error: String? = null,
     val message: String? = null,
+    val companionName: String = com.xinyu.companion.domain.CompanionProfile.DEFAULT_NAME,
 )
 
 @HiltViewModel
 class ReminderViewModel @Inject constructor(
     private val coordinator: ReminderCoordinator,
+    private val companionProfileStore: com.xinyu.companion.domain.settings.CompanionProfileStore,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
-    private val mutableState = MutableStateFlow(ReminderUiState())
+    private val mutableState = MutableStateFlow(
+        ReminderUiState(companionName = companionProfileStore.profile.value.displayName),
+    )
     val uiState: StateFlow<ReminderUiState> = mutableState.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            companionProfileStore.profile.collect { profile ->
+                mutableState.update { it.copy(companionName = profile.displayName) }
+            }
+        }
         refresh()
     }
 

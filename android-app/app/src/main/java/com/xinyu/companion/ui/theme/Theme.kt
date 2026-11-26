@@ -14,42 +14,61 @@ private val LightColors = lightColorScheme(
     primary = Coral,
     onPrimary = CreamSurface,
     primaryContainer = CoralSoft,
-    onPrimaryContainer = Ink,
+    onPrimaryContainer = CoralOnContainer,
     secondary = Sage,
+    onSecondary = CreamSurface,
+    secondaryContainer = SageSoft,
+    onSecondaryContainer = SageOnContainer,
+    tertiary = Terracotta,
+    onTertiary = CreamSurface,
+    tertiaryContainer = TerracottaSoft,
+    onTertiaryContainer = TerracottaOnContainer,
     background = WarmPaper,
     onBackground = Ink,
     surface = CreamSurface,
     onSurface = Ink,
-    surfaceVariant = ColorTokens.LightSurfaceVariant,
+    surfaceVariant = WarmSurfaceVariant,
     onSurfaceVariant = InkMuted,
-    error = ColorTokens.Error,
+    surfaceContainerLow = WarmSurfaceLow,
+    surfaceContainer = CreamSurface,
+    surfaceContainerHigh = WarmSurfaceVariant,
+    outline = WarmOutline,
+    outlineVariant = WarmOutlineVariant,
+    error = LightError,
+    onError = LightOnError,
+    errorContainer = LightErrorContainer,
+    onErrorContainer = LightOnErrorContainer,
 )
 
 private val DarkColors = darkColorScheme(
-    primary = ColorTokens.DarkCoral,
-    onPrimary = Ink,
-    primaryContainer = ColorTokens.DarkCoralContainer,
-    secondary = ColorTokens.DarkSage,
+    primary = DarkCoral,
+    onPrimary = DarkOnCoral,
+    primaryContainer = DarkCoralContainer,
+    onPrimaryContainer = DarkOnCoralContainer,
+    secondary = DarkSage,
+    onSecondary = DarkOnSage,
+    secondaryContainer = DarkSageContainer,
+    onSecondaryContainer = DarkOnSageContainer,
+    tertiary = DarkTerracotta,
+    onTertiary = DarkOnCoral,
+    tertiaryContainer = DarkTerracottaContainer,
+    onTertiaryContainer = DarkOnTerracottaContainer,
     background = WarmPaperDark,
-    onBackground = ColorTokens.DarkText,
+    onBackground = DarkInk,
     surface = NightSurface,
-    onSurface = ColorTokens.DarkText,
-    surfaceVariant = ColorTokens.DarkSurfaceVariant,
-    onSurfaceVariant = ColorTokens.DarkMuted,
-    error = ColorTokens.DarkError,
+    onSurface = DarkInk,
+    surfaceVariant = NightSurfaceVariant,
+    onSurfaceVariant = DarkInkMuted,
+    surfaceContainerLow = NightSurfaceLow,
+    surfaceContainer = NightSurface,
+    surfaceContainerHigh = NightSurfaceVariant,
+    outline = NightOutline,
+    outlineVariant = NightOutlineVariant,
+    error = DarkError,
+    onError = DarkOnError,
+    errorContainer = DarkErrorContainer,
+    onErrorContainer = DarkOnErrorContainer,
 )
-
-private object ColorTokens {
-    val LightSurfaceVariant = androidx.compose.ui.graphics.Color(0xFFF0E7DD)
-    val Error = androidx.compose.ui.graphics.Color(0xFFB3261E)
-    val DarkText = androidx.compose.ui.graphics.Color(0xFFF3EEE8)
-    val DarkMuted = androidx.compose.ui.graphics.Color(0xFFB5AFA8)
-    val DarkSurfaceVariant = androidx.compose.ui.graphics.Color(0xFF303339)
-    val DarkError = androidx.compose.ui.graphics.Color(0xFFFFB4AB)
-    val DarkCoral = androidx.compose.ui.graphics.Color(0xFFFFB4A8)
-    val DarkCoralContainer = androidx.compose.ui.graphics.Color(0xFF71352E)
-    val DarkSage = androidx.compose.ui.graphics.Color(0xFFA8C2AE)
-}
 
 @Composable
 fun XinYuTheme(
@@ -60,15 +79,17 @@ fun XinYuTheme(
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
-            val window = (view.context as Activity).window
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            val activity = view.context as? Activity ?: return@SideEffect
+            val insetsController = WindowCompat.getInsetsController(activity.window, view)
+            insetsController.isAppearanceLightStatusBars = !darkTheme
+            insetsController.isAppearanceLightNavigationBars = !darkTheme
         }
     }
 
     MaterialTheme(
         colorScheme = colors,
-        typography = androidx.compose.material3.Typography(),
+        typography = XinYuTypography,
+        shapes = XinYuShapes,
         content = content,
     )
 }
-

@@ -43,7 +43,8 @@ data class MemoryRecord(
 
 data class CompanionProfile(
     val id: String = MAIN_COMPANION_ID,
-    val name: String = "林",
+    val name: String = DEFAULT_NAME,
+    val avatarPath: String? = null,
     val persona: String = "温和但不黏人，敏锐但不抢着分析，有自己的判断和一点干幽默",
     val speakingStyle: String = "自然的中文口语，具体、克制，不表演温柔，不连续追问",
     val boundaries: List<String> = listOf(
@@ -53,8 +54,16 @@ data class CompanionProfile(
         "不写露骨色情内容，亲密表达保持自然和克制",
     ),
 ) {
+    val displayName: String
+        get() = name.trim().ifBlank { DEFAULT_NAME }
+
+    val avatarGlyph: String
+        get() = displayName.first().toString()
+
     companion object {
         const val MAIN_COMPANION_ID = "companion-linyu"
+        const val DEFAULT_NAME = "林"
+        const val MAX_NAME_LENGTH = 20
     }
 }
 

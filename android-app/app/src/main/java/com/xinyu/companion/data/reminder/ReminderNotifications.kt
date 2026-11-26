@@ -65,9 +65,13 @@ object ReminderNotifications {
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        val companionName = com.xinyu.companion.data.settings
+            .SharedPreferencesCompanionProfileStore(context)
+            .load()
+            .displayName
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_reminder_notification)
-            .setContentTitle("林提醒你")
+            .setContentTitle("${companionName}提醒你")
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setCategory(NotificationCompat.CATEGORY_REMINDER)

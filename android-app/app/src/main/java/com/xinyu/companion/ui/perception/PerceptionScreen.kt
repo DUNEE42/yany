@@ -6,20 +6,18 @@ import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.CloudQueue
@@ -29,8 +27,6 @@ import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -38,8 +34,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -47,7 +41,6 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -61,8 +54,13 @@ import com.xinyu.companion.data.notification.NotificationAccess
 import com.xinyu.companion.domain.perception.NotificationEvent
 import com.xinyu.companion.domain.perception.NotificationEventKind
 import com.xinyu.companion.domain.perception.NotificationSource
-import com.xinyu.companion.ui.theme.Coral
-import com.xinyu.companion.ui.theme.Sage
+import com.xinyu.companion.ui.components.IntroHeroCard
+import com.xinyu.companion.ui.components.NoticeBanner
+import com.xinyu.companion.ui.components.NoticeTone
+import com.xinyu.companion.ui.components.StatusPill
+import com.xinyu.companion.ui.components.StatusTone
+import com.xinyu.companion.ui.components.SurfaceCard
+import com.xinyu.companion.ui.components.ToggleRow
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -111,18 +109,24 @@ fun PerceptionScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .navigationBarsPadding(),
+                .navigationBarsPadding()
+                .imePadding(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                PerceptionIntroCard()
+                IntroHeroCard(
+                    title = "让它看到一点上下文",
+                    body = "观察默认关闭。你允许的来源只生成短期摘要；相关摘要会在当轮聊天时发送给 DeepSeek，不会自动变成长期记忆。",
+                    footnote = "环境观察只在你发消息时参考。需要主动提醒时，请到“设置 → 提醒”明确设定时间；言语不会根据身份或通知内容猜课表。",
+                    icon = Icons.Outlined.Visibility,
+                )
             }
             if (state.message != null || state.error != null) {
                 item {
-                    NoticeCard(
+                    NoticeBanner(
                         text = state.error ?: state.message.orEmpty(),
-                        isError = state.error != null,
+                        tone = if (state.error != null) NoticeTone.ERROR else NoticeTone.SUCCESS,
                     )
                 }
             }
@@ -156,9 +160,7 @@ fun PerceptionScreen(
                             .padding(start = 4.dp, top = 4.dp),
                     )
                     if (state.sources.isNotEmpty()) {
-                        TextButton(onClick = onClearSources) {
-                            Text("清除来源记录")
-                        }
+                        TextButton(onClick = onClearSources) { Text("清除来源记录") }
                     }
                 }
                 Text(
@@ -170,17 +172,29 @@ fun PerceptionScreen(
             }
             if (state.sources.isEmpty()) {
                 item {
-                    SourceEmptyCard(state.access.notificationAccess)
+                    SurfaceCard {
+                        Text(
+                            if (state.access.notificationAccess) {
+                                "暂时没有发现通知来源。收到通知后，这里会出现应用名称。"
+                            } else {
+                                "先开启通知使用权，再回到这里选择允许的来源。"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             } else {
                 items(state.sources, key = NotificationSource::packageName) { source ->
-                    SourceRow(
-                        source = source,
-                        allowed = source.packageName in state.allowedPackages,
-                        onAllowedChange = {
-                            onNotificationSourceChange(source.packageName, it)
-                        },
-                    )
+                    SurfaceCard {
+                        ToggleRow(
+                            icon = Icons.Outlined.NotificationsActive,
+                            title = source.appLabel,
+                            subtitle = source.packageName,
+                            checked = source.packageName in state.allowedPackages,
+                            onCheckedChange = { onNotificationSourceChange(source.packageName, it) },
+                        )
+                    }
                 }
             }
             item {
@@ -190,9 +204,7 @@ fun PerceptionScreen(
                     onPreferredCityChange = { preferredCity = it.take(80) },
                     onForegroundAppChange = onForegroundAppChange,
                     onCoarseLocationChange = onCoarseLocationChange,
-                    onSaveCity = {
-                        onSaveSearchConfiguration(searchUrl, preferredCity)
-                    },
+                    onSaveCity = { onSaveSearchConfiguration(searchUrl, preferredCity) },
                 )
             }
             item {
@@ -201,9 +213,7 @@ fun PerceptionScreen(
                     searchUrl = searchUrl,
                     onSearchUrlChange = { searchUrl = it.trim().take(500) },
                     onWebSearchChange = onWebSearchChange,
-                    onSave = {
-                        onSaveSearchConfiguration(searchUrl, preferredCity)
-                    },
+                    onSave = { onSaveSearchConfiguration(searchUrl, preferredCity) },
                     onTest = {
                         onSaveSearchConfiguration(searchUrl, preferredCity)
                         onTestSearch(searchUrl)
@@ -211,11 +221,22 @@ fun PerceptionScreen(
                 )
             }
             item {
-                RecentEventsHeader(
-                    count = state.events.size,
-                    canClear = state.events.isNotEmpty(),
-                    onClear = onClearEvents,
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "近期观察 ${state.events.size} 条",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (state.events.isNotEmpty()) {
+                        TextButton(onClick = onClearEvents) { Text("全部清除") }
+                    }
+                }
             }
             if (state.events.isEmpty()) {
                 item {
@@ -236,42 +257,12 @@ fun PerceptionScreen(
 }
 
 @Composable
-private fun PerceptionIntroCard() {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
-        ),
-        shape = RoundedCornerShape(24.dp),
-    ) {
-        Column(Modifier.padding(18.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.Visibility, contentDescription = null, tint = Coral)
-                Spacer(Modifier.size(8.dp))
-                Text("让它看到一点上下文", fontWeight = FontWeight.SemiBold)
-            }
-            Text(
-                "观察默认关闭。你允许的来源只生成短期摘要；相关摘要会在当轮聊天时发送给 DeepSeek，不会自动变成长期记忆。",
-                modifier = Modifier.padding(top = 7.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                "环境观察只在你发消息时参考。需要主动提醒时，请到“设置 → 提醒”明确设定时间；言语不会根据身份或通知内容猜课表。",
-                modifier = Modifier.padding(top = 5.dp),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
 private fun PermissionCard(
     state: PerceptionUiState,
     onOpenNotificationAccess: () -> Unit,
     onOpenUsageAccess: () -> Unit,
 ) {
-    SettingsCard {
+    SurfaceCard {
         Text("系统权限", fontWeight = FontWeight.SemiBold)
         Text(
             "这些权限由 Android 管理，言语不能绕过。",
@@ -282,13 +273,11 @@ private fun PermissionCard(
         PermissionRow(
             title = "通知使用权",
             active = state.access.notificationAccess,
-            action = if (state.access.notificationAccess) "已开启" else "去开启",
             onAction = onOpenNotificationAccess,
         )
         PermissionRow(
             title = "使用情况访问",
             active = state.access.usageAccess,
-            action = if (state.access.usageAccess) "已开启" else "去开启",
             onAction = onOpenUsageAccess,
         )
     }
@@ -298,7 +287,6 @@ private fun PermissionCard(
 private fun PermissionRow(
     title: String,
     active: Boolean,
-    action: String,
     onAction: () -> Unit,
 ) {
     Row(
@@ -307,59 +295,13 @@ private fun PermissionRow(
             .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Surface(
-            color = if (active) Sage.copy(alpha = 0.16f)
-            else MaterialTheme.colorScheme.surfaceVariant,
-            shape = CircleShape,
-        ) {
-            Text(
-                if (active) "已授权" else "未授权",
-                modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
-                style = MaterialTheme.typography.labelSmall,
-                color = if (active) Sage else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        StatusPill(
+            label = if (active) "已授权" else "未授权",
+            tone = if (active) StatusTone.POSITIVE else StatusTone.NEUTRAL,
+        )
         Spacer(Modifier.size(10.dp))
         Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        TextButton(onClick = onAction) { Text(action) }
-    }
-}
-
-@Composable
-private fun SourceRow(
-    source: NotificationSource,
-    allowed: Boolean,
-    onAllowedChange: (Boolean) -> Unit,
-) {
-    SettingsCard {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.NotificationsActive, contentDescription = null, tint = Coral)
-            Spacer(Modifier.size(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text(source.appLabel, fontWeight = FontWeight.SemiBold)
-                Text(
-                    source.packageName,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Switch(checked = allowed, onCheckedChange = onAllowedChange)
-        }
-    }
-}
-
-@Composable
-private fun SourceEmptyCard(notificationAccess: Boolean) {
-    SettingsCard {
-        Text(
-            if (notificationAccess) {
-                "暂时没有发现通知来源。收到通知后，这里会出现应用名称。"
-            } else {
-                "先开启通知使用权，再回到这里选择允许的来源。"
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        TextButton(onClick = onAction) { Text(if (active) "已开启" else "去开启") }
     }
 }
 
@@ -372,7 +314,7 @@ private fun SensorSettingsCard(
     onCoarseLocationChange: (Boolean) -> Unit,
     onSaveCity: () -> Unit,
 ) {
-    SettingsCard {
+    SurfaceCard {
         ToggleRow(
             icon = Icons.Outlined.Visibility,
             title = "当前前台应用",
@@ -415,7 +357,7 @@ private fun SearchSettingsCard(
     onSave: () -> Unit,
     onTest: () -> Unit,
 ) {
-    SettingsCard {
+    SurfaceCard {
         ToggleRow(
             icon = Icons.Outlined.Search,
             title = "联网搜索",
@@ -464,35 +406,11 @@ private fun SearchSettingsCard(
 }
 
 @Composable
-private fun RecentEventsHeader(
-    count: Int,
-    canClear: Boolean,
-    onClear: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            "近期观察 $count 条",
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(1f),
-        )
-        if (canClear) {
-            TextButton(onClick = onClear) { Text("全部清除") }
-        }
-    }
-}
-
-@Composable
 private fun EventRow(
     event: NotificationEvent,
     onDelete: () -> Unit,
 ) {
-    SettingsCard {
+    SurfaceCard {
         Row(verticalAlignment = Alignment.Top) {
             Icon(
                 imageVector = when (event.kind) {
@@ -500,7 +418,7 @@ private fun EventRow(
                     else -> Icons.Outlined.NotificationsActive
                 },
                 contentDescription = null,
-                tint = Coral,
+                tint = MaterialTheme.colorScheme.primary,
             )
             Spacer(Modifier.size(10.dp))
             Column(Modifier.weight(1f)) {
@@ -521,68 +439,6 @@ private fun EventRow(
                 Icon(Icons.Outlined.DeleteOutline, contentDescription = "删除观察")
             }
         }
-    }
-}
-
-@Composable
-private fun ToggleRow(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, contentDescription = null, tint = Coral)
-        Spacer(Modifier.size(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text(title, fontWeight = FontWeight.SemiBold)
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
-    }
-}
-
-@Composable
-private fun NoticeCard(
-    text: String,
-    isError: Boolean,
-) {
-    Surface(
-        color = if (isError) {
-            MaterialTheme.colorScheme.error.copy(alpha = 0.1f)
-        } else {
-            Sage.copy(alpha = 0.13f)
-        },
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Text(
-            text,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            style = MaterialTheme.typography.bodySmall,
-            color = if (isError) MaterialTheme.colorScheme.error else Sage,
-        )
-    }
-}
-
-@Composable
-private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(20.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            content = content,
-        )
     }
 }
 

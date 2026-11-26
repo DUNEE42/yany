@@ -13,8 +13,15 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
 class ApiSettingsStore(context: Context) : ProviderSettingsStore {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+    private val mutableConfigured = MutableStateFlow(preferences.contains(KEY_API_KEY))
+
+    override val configured: StateFlow<Boolean> = mutableConfigured.asStateFlow()
 
     @Synchronized
     override fun load(): ProviderConfig {
@@ -23,13 +30,15 @@ class ApiSettingsStore(context: Context) : ProviderSettingsStore {
             ?.let { runCatching { String(decrypt(Base64.decode(it, Base64.NO_WRAP)), Charsets.UTF_8) }.getOrNull() }
             .orEmpty()
 
-        return ProviderConfig(
+        val config = ProviderConfig(
             apiKey = apiKey,
             baseUrl = preferences.getString(KEY_BASE_URL, null)
                 ?: ProviderConfig.DEFAULT_BASE_URL,
             model = preferences.getString(KEY_MODEL, null)
                 ?: ProviderConfig.DEFAULT_MODEL,
         )
+        mutableConfigured.value = config.isConfigured
+        return config
     }
 
     @Synchronized
@@ -46,12 +55,14 @@ class ApiSettingsStore(context: Context) : ProviderSettingsStore {
             editor.putString(KEY_API_KEY, Base64.encodeToString(encrypted, Base64.NO_WRAP))
         }
         editor.commit()
+        mutableConfigured.value = config.isConfigured
     }
 
     @Synchronized
     @SuppressLint("ApplySharedPref")
     override fun clearApiKey() {
         preferences.edit().remove(KEY_API_KEY).commit()
+        mutableConfigured.value = false
     }
 
     private fun encrypt(value: ByteArray): ByteArray {

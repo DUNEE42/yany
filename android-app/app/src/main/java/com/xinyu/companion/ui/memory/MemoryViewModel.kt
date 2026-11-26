@@ -54,13 +54,15 @@ class MemoryViewModel @Inject constructor(
     private val store: MemoryStore,
     private val settings: MemorySettingsStore,
     private val coordinator: MemoryWorkCoordinator,
+    private val companionProfileStore: com.xinyu.companion.domain.settings.CompanionProfileStore,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
-    private val companion = CompanionProfile()
+    private val companion: CompanionProfile
+        get() = companionProfileStore.profile.value
     private val feedback = MutableStateFlow(MemoryFeedback())
 
     private val content = combine(
-        store.observeMemories(companion.id),
+        store.observeMemories(CompanionProfile.MAIN_COMPANION_ID),
         store.observeLatestSummary(ConversationIds.DEFAULT),
         store.observeLatestJob(ConversationIds.DEFAULT),
         settings.autoMemoryEnabled,
