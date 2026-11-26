@@ -51,6 +51,7 @@ private data class InteractionState(
     val conversationReady: Boolean = false,
     val conversationError: String? = null,
     val searchConfirmation: SearchConfirmationUiState? = null,
+    val toolSearchDraft: String? = null,
 )
 
 @HiltViewModel
@@ -72,6 +73,13 @@ class ChatViewModel @Inject constructor(
         apiSettingsStore.configured,
         companionProfileStore.profile,
     ) { messages, local, engine, hasApiKey, companion ->
+        val effectiveSearchConfirmation = engine.pendingToolSearch?.let { pending ->
+            SearchConfirmationUiState(
+                originalMessage = "",
+                query = local.toolSearchDraft ?: pending.suggestedQuery,
+                error = pending.error,
+            )
+        } ?: local.searchConfirmation
         ChatUiState(
             messages = messages,
             input = local.input,
@@ -82,7 +90,7 @@ class ChatViewModel @Inject constructor(
             hasApiKey = hasApiKey,
             isConversationReady = local.conversationReady,
             liveContextLabel = engine.liveContextLabel,
-            searchConfirmation = local.searchConfirmation,
+            searchConfirmation = effectiveSearchConfirmation,
             companionName = companion.displayName,
             companionAvatarPath = companion.avatarPath,
         )
@@ -154,11 +162,16 @@ class ChatViewModel @Inject constructor(
     }
 
     fun updateSearchQuery(value: String) {
+        val clipped = value.take(MAX_SEARCH_QUERY_LENGTH)
+        if (chatEngine.state.value.pendingToolSearch != null) {
+            interaction.update { it.copy(toolSearchDraft = clipped) }
+            return
+        }
         interaction.update { current ->
             val pending = current.searchConfirmation ?: return@update current
             current.copy(
                 searchConfirmation = pending.copy(
-                    query = value.take(MAX_SEARCH_QUERY_LENGTH),
+                    query = clipped,
                     error = null,
                 ),
             )
@@ -166,6 +179,14 @@ class ChatViewModel @Inject constructor(
     }
 
     fun confirmSearchAndSend() {
+        val midTurnPending = chatEngine.state.value.pendingToolSearch
+        if (midTurnPending != null) {
+            val candidate = interaction.value.toolSearchDraft ?: midTurnPending.suggestedQuery
+            if (chatEngine.approveToolSearch(candidate)) {
+                interaction.update { it.copy(toolSearchDraft = null) }
+            }
+            return
+        }
         val pending = interaction.value.searchConfirmation ?: return
         val approvedQuery = PerceptionQueryPolicy.normalizeConfirmedSearchQuery(pending.query)
         if (approvedQuery == null) {
@@ -182,11 +203,21 @@ class ChatViewModel @Inject constructor(
     }
 
     fun sendWithoutSearch() {
+        if (chatEngine.state.value.pendingToolSearch != null) {
+            interaction.update { it.copy(toolSearchDraft = null) }
+            chatEngine.rejectToolSearch()
+            return
+        }
         val pending = interaction.value.searchConfirmation ?: return
         sendApproved(pending.originalMessage, approvedSearchQuery = null)
     }
 
     fun dismissSearchConfirmation() {
+        if (chatEngine.state.value.pendingToolSearch != null) {
+            interaction.update { it.copy(toolSearchDraft = null) }
+            chatEngine.rejectToolSearch()
+            return
+        }
         interaction.update { it.copy(searchConfirmation = null) }
     }
 

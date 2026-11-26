@@ -21,6 +21,10 @@ interface ReminderAlarmScheduler {
     fun cancel(id: String)
 }
 
+interface ReminderPermissionChecker {
+    fun areNotificationsEnabled(): Boolean
+}
+
 object ReminderPolicy {
     const val MAX_MESSAGE_LENGTH = 120
     const val MAX_REMINDERS = 30

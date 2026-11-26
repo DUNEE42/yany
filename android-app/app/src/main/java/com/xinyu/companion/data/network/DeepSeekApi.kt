@@ -1,12 +1,12 @@
 package com.xinyu.companion.data.network
 
+import com.xinyu.companion.BuildConfig
+import com.xinyu.companion.domain.GenerationEvent
+import com.xinyu.companion.domain.ReplyLength
 import com.xinyu.companion.domain.provider.ChatProvider
 import com.xinyu.companion.domain.provider.ChatRequest
 import com.xinyu.companion.domain.provider.ProviderCapabilities
 import com.xinyu.companion.domain.provider.ProviderConfig
-import com.xinyu.companion.BuildConfig
-import com.xinyu.companion.domain.ReplyLength
-import com.xinyu.companion.domain.GenerationEvent
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
@@ -43,7 +44,7 @@ class DeepSeekApi(
     override val capabilities: ProviderCapabilities = ProviderCapabilities(
         streaming = true,
         images = false,
-        tools = false,
+        tools = true,
         usageReporting = true,
     )
 
@@ -54,7 +55,7 @@ class DeepSeekApi(
         val generationId = "local_${UUID.randomUUID()}"
         val finished = AtomicBoolean(false)
         val sawDone = AtomicBoolean(false)
-        val request = Request.Builder()
+        val httpRequest = Request.Builder()
             .url(chatCompletionsUrl(config.baseUrl))
             .header("Authorization", "Bearer ${config.apiKey}")
             .header("Accept", "text/event-stream")
@@ -83,7 +84,7 @@ class DeepSeekApi(
                 type: String?,
                 data: String,
             ) {
-                val event = runCatching { parser.parse(data) }.getOrElse {
+                val events = runCatching { parser.parseEvents(data) }.getOrElse {
                     finish(
                         GenerationEvent.Failed(
                             code = "stream_parse_error",
@@ -93,14 +94,19 @@ class DeepSeekApi(
                     )
                     return
                 }
-                when (event) {
-                    null -> Unit
-                    is GenerationEvent.Completed -> {
-                        sawDone.set(true)
-                        finish(GenerationEvent.Completed)
+                for (event in events) {
+                    when (event) {
+                        is GenerationEvent.Completed -> {
+                            sawDone.set(true)
+                            finish(GenerationEvent.Completed)
+                            return
+                        }
+                        is GenerationEvent.Failed -> {
+                            finish(event)
+                            return
+                        }
+                        else -> trySend(event)
                     }
-                    is GenerationEvent.Failed -> finish(event)
-                    else -> trySend(event)
                 }
             }
 
@@ -114,16 +120,23 @@ class DeepSeekApi(
                     ?.let {
                         runCatching { it.peekBody(BODY_INSPECTION_LIMIT).string() }.getOrNull()
                     }
-                val fallback = runCatching {
-                    fallbackBody?.let(parser::parseNonStreaming)
-                }.getOrNull()
-                when (fallback) {
-                    is GenerationEvent.Delta -> {
-                        trySend(fallback)
-                        finish(GenerationEvent.Completed)
-                    }
-                    is GenerationEvent.Failed -> finish(fallback)
-                    else -> finish(response.toFailureEvent(t))
+                val fallbackEvents = runCatching {
+                    fallbackBody?.let(parser::parseNonStreamingEvents).orEmpty()
+                }.getOrDefault(emptyList())
+
+                val failure = fallbackEvents.filterIsInstance<GenerationEvent.Failed>().firstOrNull()
+                if (failure != null) {
+                    finish(failure)
+                    return
+                }
+                val meaningful = fallbackEvents.filter {
+                    it is GenerationEvent.Delta || it is GenerationEvent.ToolCallDelta
+                }
+                if (meaningful.isNotEmpty()) {
+                    meaningful.forEach { trySend(it) }
+                    finish(GenerationEvent.Completed)
+                } else {
+                    finish(response.toFailureEvent(t))
                 }
             }
 
@@ -142,7 +155,7 @@ class DeepSeekApi(
             }
         }
 
-        val source = EventSources.createFactory(client).newEventSource(request, listener)
+        val source = EventSources.createFactory(client).newEventSource(httpRequest, listener)
         awaitClose {
             finished.set(true)
             source.cancel()
@@ -189,9 +202,50 @@ class DeepSeekApi(
                     buildJsonObject {
                         put("role", turn.role)
                         put("content", turn.content)
+                        if (turn.toolCalls.isNotEmpty()) {
+                            putJsonArray("tool_calls") {
+                                turn.toolCalls.forEach { call ->
+                                    add(
+                                        buildJsonObject {
+                                            put("id", call.id)
+                                            put("type", "function")
+                                            putJsonObject("function") {
+                                                put("name", call.name)
+                                                put("arguments", call.argumentsJson)
+                                            }
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                        turn.toolCallId?.let { put("tool_call_id", it) }
+                        turn.toolName?.let { put("name", it) }
                     },
                 )
             }
+        }
+        if (request.tools.isNotEmpty()) {
+            putJsonArray("tools") {
+                request.tools.forEach { tool ->
+                    val schema = runCatching {
+                        json.parseToJsonElement(tool.parametersJsonSchema) as? JsonObject
+                    }.getOrNull() ?: buildJsonObject {
+                        put("type", "object")
+                        putJsonObject("properties") {}
+                    }
+                    add(
+                        buildJsonObject {
+                            put("type", "function")
+                            putJsonObject("function") {
+                                put("name", tool.name)
+                                put("description", tool.description)
+                                put("parameters", schema)
+                            }
+                        },
+                    )
+                }
+            }
+            put("tool_choice", request.toolChoice ?: "auto")
         }
         put("stream", true)
         putJsonObject("stream_options") {

@@ -71,17 +71,39 @@ object ConversationIds {
     const val DEFAULT = "main-conversation"
 }
 
+data class ToolDefinition(
+    val name: String,
+    val description: String,
+    val parametersJsonSchema: String,
+)
+
+data class ToolCall(
+    val id: String,
+    val name: String,
+    val argumentsJson: String,
+)
+
 data class ContextTurn(
     val id: String,
     val role: String,
     val content: String,
     val sequence: Long,
+    val toolCalls: List<ToolCall> = emptyList(),
+    val toolCallId: String? = null,
+    val toolName: String? = null,
 )
 
 sealed interface GenerationEvent {
     data class Started(val generationId: String, val assistantMessageId: String?) : GenerationEvent
 
     data class Delta(val text: String) : GenerationEvent
+
+    data class ToolCallDelta(
+        val index: Int,
+        val id: String? = null,
+        val name: String? = null,
+        val argumentsDelta: String = "",
+    ) : GenerationEvent
 
     data class Safety(
         val level: String,
@@ -104,15 +126,44 @@ sealed interface GenerationEvent {
 
 data class StreamSnapshot(
     val text: String = "",
+    val toolCallBuilders: Map<Int, PartialToolCall> = emptyMap(),
     val completed: Boolean = false,
     val error: String? = null,
     val errorCode: String? = null,
     val retryable: Boolean = false,
     val safetyLevel: String = "normal",
+) {
+    val toolCalls: List<ToolCall>
+        get() = toolCallBuilders.entries
+            .sortedBy { it.key }
+            .mapNotNull { (index, partial) ->
+                val name = partial.name.trim()
+                if (name.isBlank()) return@mapNotNull null
+                ToolCall(
+                    id = partial.id.ifBlank { "call_$index" },
+                    name = name,
+                    argumentsJson = partial.argumentsJson.ifBlank { "{}" },
+                )
+            }
+}
+
+data class PartialToolCall(
+    val id: String = "",
+    val name: String = "",
+    val argumentsJson: String = "",
 )
 
 fun StreamSnapshot.reduce(event: GenerationEvent): StreamSnapshot = when (event) {
     is GenerationEvent.Delta -> copy(text = text + event.text)
+    is GenerationEvent.ToolCallDelta -> {
+        val current = toolCallBuilders[event.index] ?: PartialToolCall()
+        val updated = current.copy(
+            id = event.id?.takeIf(String::isNotBlank) ?: current.id,
+            name = event.name?.takeIf(String::isNotBlank) ?: current.name,
+            argumentsJson = current.argumentsJson + event.argumentsDelta,
+        )
+        copy(toolCallBuilders = toolCallBuilders + (event.index to updated))
+    }
     is GenerationEvent.Safety -> copy(safetyLevel = event.level)
     GenerationEvent.Completed -> copy(completed = true, error = null)
     is GenerationEvent.Failed -> copy(
