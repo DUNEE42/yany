@@ -31,6 +31,7 @@ fun ActionSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.extraLarge,
     ) {
         Column(
             modifier = Modifier

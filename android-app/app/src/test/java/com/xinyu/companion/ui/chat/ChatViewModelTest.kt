@@ -9,15 +9,9 @@ import com.xinyu.companion.domain.ContextAssembler
 import com.xinyu.companion.domain.ConversationStyle
 import com.xinyu.companion.domain.GenerationEvent
 import com.xinyu.companion.domain.MessageStatus
-import com.xinyu.companion.domain.ReplyLength
 import com.xinyu.companion.domain.SafetyPolicy
 import com.xinyu.companion.domain.diagnostics.DiagnosticSink
 import com.xinyu.companion.domain.diagnostics.GenerationOutcome
-import com.xinyu.companion.domain.provider.ChatProvider
-import com.xinyu.companion.domain.provider.ChatRequest
-import com.xinyu.companion.domain.provider.ProviderCapabilities
-import com.xinyu.companion.domain.provider.ProviderConfig
-import com.xinyu.companion.domain.repository.ChatConversationStore
 import com.xinyu.companion.domain.memory.MemoryContextProvider
 import com.xinyu.companion.domain.memory.MemoryPromptContext
 import com.xinyu.companion.domain.memory.MemoryWorkCoordinator
@@ -25,8 +19,15 @@ import com.xinyu.companion.domain.perception.PerceptionContextProvider
 import com.xinyu.companion.domain.perception.PerceptionPromptContext
 import com.xinyu.companion.domain.perception.PerceptionSettings
 import com.xinyu.companion.domain.perception.PerceptionSettingsStore
+import com.xinyu.companion.domain.provider.ChatProvider
+import com.xinyu.companion.domain.provider.ChatRequest
+import com.xinyu.companion.domain.provider.ProviderCapabilities
+import com.xinyu.companion.domain.provider.ProviderConfig
+import com.xinyu.companion.domain.repository.ChatConversationStore
 import com.xinyu.companion.domain.settings.ChatStyleStore
+import com.xinyu.companion.domain.settings.CompanionProfileStore
 import com.xinyu.companion.domain.settings.ProviderSettingsStore
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -35,8 +36,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -64,100 +66,35 @@ class ChatViewModelTest {
     }
 
     @Test
-    fun `initial load seeds conversation and reports configured key`() = runTest(dispatcher) {
+    fun `initial load seeds conversation and starts memory coordinator`() = runTest(dispatcher) {
         val dependencies = dependencies(ProviderConfig(apiKey = "saved-key"))
 
         val viewModel = dependencies.viewModel()
+        val collector = backgroundScope.launch { viewModel.uiState.collect {} }
         advanceUntilIdle()
 
         assertThat(dependencies.store.seedCalls).isEqualTo(1)
         assertThat(dependencies.memoryCoordinator.startCalls).isEqualTo(1)
-        assertThat(viewModel.settingsState.value.loaded).isTrue()
-        assertThat(viewModel.settingsState.value.hasApiKey).isTrue()
+        assertThat(viewModel.uiState.value.hasApiKey).isTrue()
+        assertThat(viewModel.uiState.value.isConversationReady).isTrue()
+        collector.cancel()
     }
 
     @Test
-    fun `successful connection test saves provider settings`() = runTest(dispatcher) {
-        val dependencies = dependencies(ProviderConfig(apiKey = ""))
-        val viewModel = dependencies.viewModel()
-        advanceUntilIdle()
-
-        viewModel.updateProviderKey("new-key")
-        viewModel.updateProviderModel("deepseek-chat")
-        viewModel.testAndSaveProvider()
-        advanceUntilIdle()
-
-        assertThat(dependencies.provider.lastTestedConfig?.apiKey).isEqualTo("new-key")
-        assertThat(dependencies.settings.savedConfig?.apiKey).isEqualTo("new-key")
-        assertThat(viewModel.settingsState.value.hasApiKey).isTrue()
-        assertThat(viewModel.settingsState.value.keyDraft).isEmpty()
-    }
-
-    @Test
-    fun `deleting key does not clear messages`() = runTest(dispatcher) {
+    fun `reacts to updated companion profile name and avatar path`() = runTest(dispatcher) {
         val dependencies = dependencies(ProviderConfig(apiKey = "saved-key"))
         val viewModel = dependencies.viewModel()
+        val collector = backgroundScope.launch { viewModel.uiState.collect {} }
         advanceUntilIdle()
 
-        viewModel.clearApiKey()
-        advanceUntilIdle()
-
-        assertThat(viewModel.settingsState.value.hasApiKey).isFalse()
-        assertThat(dependencies.settings.clearCalls).isEqualTo(1)
-        assertThat(dependencies.store.clearCalls).isEqualTo(0)
-    }
-
-    @Test
-    fun `clearing messages reseeds the conversation without deleting key`() = runTest(dispatcher) {
-        val dependencies = dependencies(ProviderConfig(apiKey = "saved-key"))
-        val viewModel = dependencies.viewModel()
-        advanceUntilIdle()
-
-        viewModel.clearChatMessages()
-        advanceUntilIdle()
-
-        assertThat(dependencies.store.clearCalls).isEqualTo(1)
-        assertThat(dependencies.store.seedCalls).isEqualTo(2)
-        assertThat(dependencies.settings.clearCalls).isEqualTo(0)
-        assertThat(viewModel.settingsState.value.hasApiKey).isTrue()
-    }
-
-    @Test
-    fun `failed connection test does not save provider settings`() = runTest(dispatcher) {
-        val dependencies = dependencies(ProviderConfig(apiKey = ""))
-        dependencies.provider.testResult = Result.failure(Exception("invalid key"))
-        val viewModel = dependencies.viewModel()
-        advanceUntilIdle()
-
-        viewModel.updateProviderKey("bad-key")
-        viewModel.testAndSaveProvider()
-        advanceUntilIdle()
-
-        assertThat(dependencies.settings.savedConfig).isNull()
-        assertThat(viewModel.settingsState.value.hasApiKey).isFalse()
-        assertThat(viewModel.settingsState.value.error).contains("invalid key")
-    }
-
-    @Test
-    fun `conversation style is persisted`() = runTest(dispatcher) {
-        val dependencies = dependencies(ProviderConfig(apiKey = "saved-key"))
-        val viewModel = dependencies.viewModel()
-        advanceUntilIdle()
-
-        viewModel.saveConversationStyle(
-            temperature = 1.25f,
-            closeness = 78f,
-            replyLength = ReplyLength.DETAILED,
+        dependencies.companionProfile.save(
+            CompanionProfile(name = "清屿", avatarPath = "/tmp/avatar.jpg"),
         )
         advanceUntilIdle()
 
-        assertThat(dependencies.style.savedStyle).isEqualTo(
-            ConversationStyle(
-                temperature = 1.25,
-                closeness = 78,
-                replyLength = ReplyLength.DETAILED,
-            ),
-        )
+        assertThat(viewModel.uiState.value.companionName).isEqualTo("清屿")
+        assertThat(viewModel.uiState.value.companionAvatarPath).isEqualTo("/tmp/avatar.jpg")
+        collector.cancel()
     }
 
     @Test
@@ -243,14 +180,15 @@ class ChatViewModelTest {
         assertThat(dependencies.store.appendCalls).isEqualTo(1)
     }
 
-    private fun dependencies(config: ProviderConfig): TestDependencies {
-        val store = FakeConversationStore()
-        val settings = FakeProviderSettingsStore(config)
+    private fun dependencies(config: ProviderConfig): ChatTestDependencies {
+        val store = FakeChatConversationStore()
+        val settings = FakeChatProviderSettingsStore(config)
+        val companionProfile = FakeChatCompanionProfileStore()
         val style = FakeChatStyleStore()
-        val provider = FakeProvider()
-        val memoryCoordinator = FakeMemoryWorkCoordinator()
-        val perceptionSettings = FakePerceptionSettingsStore()
-        val perception = FakePerceptionContextProvider()
+        val provider = FakeChatProvider()
+        val memoryCoordinator = FakeChatMemoryWorkCoordinator()
+        val perceptionSettings = FakeChatPerceptionSettingsStore()
+        val perception = FakeChatPerceptionContextProvider()
         val diagnostics = object : DiagnosticSink {
             override fun recordGeneration(
                 assistantMessageId: String,
@@ -267,7 +205,7 @@ class ChatViewModelTest {
             settingsStore = settings,
             styleStore = style,
             contextAssembler = ContextAssembler(),
-            memoryContextProvider = FakeMemoryContextProvider(),
+            memoryContextProvider = FakeChatMemoryContextProvider(),
             memoryCoordinator = memoryCoordinator,
             perceptionContextProvider = perception,
             safetyPolicy = SafetyPolicy(),
@@ -275,34 +213,31 @@ class ChatViewModelTest {
             ioDispatcher = dispatcher,
             scope = scope,
         )
-        return TestDependencies(
-            store,
-            settings,
-            style,
-            provider,
-            engine,
-            memoryCoordinator,
-            perceptionSettings,
-            perception,
+        return ChatTestDependencies(
+            store = store,
+            settings = settings,
+            companionProfile = companionProfile,
+            engine = engine,
+            memoryCoordinator = memoryCoordinator,
+            perceptionSettings = perceptionSettings,
+            perception = perception,
         )
     }
 }
 
-private data class TestDependencies(
-    val store: FakeConversationStore,
-    val settings: FakeProviderSettingsStore,
-    val style: FakeChatStyleStore,
-    val provider: FakeProvider,
+private data class ChatTestDependencies(
+    val store: FakeChatConversationStore,
+    val settings: FakeChatProviderSettingsStore,
+    val companionProfile: FakeChatCompanionProfileStore,
     val engine: ChatEngine,
-    val memoryCoordinator: FakeMemoryWorkCoordinator,
-    val perceptionSettings: FakePerceptionSettingsStore,
-    val perception: FakePerceptionContextProvider,
+    val memoryCoordinator: FakeChatMemoryWorkCoordinator,
+    val perceptionSettings: FakeChatPerceptionSettingsStore,
+    val perception: FakeChatPerceptionContextProvider,
 ) {
     fun viewModel() = ChatViewModel(
         store = store,
         apiSettingsStore = settings,
-        styleStore = style,
-        chatProvider = provider,
+        companionProfileStore = companionProfile,
         chatEngine = engine,
         memoryCoordinator = memoryCoordinator,
         perceptionSettingsStore = perceptionSettings,
@@ -310,7 +245,19 @@ private data class TestDependencies(
     )
 }
 
-private class FakeMemoryContextProvider : MemoryContextProvider {
+private class FakeChatCompanionProfileStore : CompanionProfileStore {
+    private val mutable = MutableStateFlow(CompanionProfile())
+    override val profile: StateFlow<CompanionProfile> = mutable.asStateFlow()
+
+    override fun load(): CompanionProfile = mutable.value
+
+    override fun save(profile: CompanionProfile): CompanionProfile {
+        mutable.value = profile
+        return profile
+    }
+}
+
+private class FakeChatMemoryContextProvider : MemoryContextProvider {
     override suspend fun build(
         companionId: String,
         conversationId: String,
@@ -318,7 +265,7 @@ private class FakeMemoryContextProvider : MemoryContextProvider {
     ): MemoryPromptContext = MemoryPromptContext()
 }
 
-private class FakePerceptionSettingsStore(
+private class FakeChatPerceptionSettingsStore(
     var current: PerceptionSettings = PerceptionSettings(),
 ) : PerceptionSettingsStore {
     override val settings = MutableStateFlow(current)
@@ -331,7 +278,7 @@ private class FakePerceptionSettingsStore(
     }
 }
 
-private class FakePerceptionContextProvider : PerceptionContextProvider {
+private class FakeChatPerceptionContextProvider : PerceptionContextProvider {
     var lastApprovedQuery: String? = null
 
     override suspend fun build(
@@ -343,7 +290,7 @@ private class FakePerceptionContextProvider : PerceptionContextProvider {
     }
 }
 
-private class FakeMemoryWorkCoordinator : MemoryWorkCoordinator {
+private class FakeChatMemoryWorkCoordinator : MemoryWorkCoordinator {
     var startCalls = 0
 
     override val isProcessing: StateFlow<Boolean> = MutableStateFlow(false)
@@ -357,41 +304,39 @@ private class FakeMemoryWorkCoordinator : MemoryWorkCoordinator {
     override fun consolidateNow(conversationId: String, companion: CompanionProfile) = Unit
 }
 
-private class FakeProviderSettingsStore(
+private class FakeChatProviderSettingsStore(
     private var config: ProviderConfig,
 ) : ProviderSettingsStore {
-    var savedConfig: ProviderConfig? = null
-    var clearCalls = 0
+    private val mutableConfigured = MutableStateFlow(config.isConfigured)
+    override val configured: StateFlow<Boolean> = mutableConfigured.asStateFlow()
 
-    override fun load(): ProviderConfig = config
+    override fun load(): ProviderConfig {
+        mutableConfigured.value = config.isConfigured
+        return config
+    }
 
     override fun save(config: ProviderConfig) {
         this.config = config
-        savedConfig = config
+        mutableConfigured.value = config.isConfigured
     }
 
     override fun clearApiKey() {
-        clearCalls += 1
         config = config.copy(apiKey = "")
+        mutableConfigured.value = false
     }
 }
 
 private class FakeChatStyleStore : ChatStyleStore {
     private var style = ConversationStyle()
-    var savedStyle: ConversationStyle? = null
 
     override fun load(): ConversationStyle = style
 
     override fun save(style: ConversationStyle) {
         this.style = style
-        savedStyle = style
     }
 }
 
-private class FakeProvider : ChatProvider {
-    var lastTestedConfig: ProviderConfig? = null
-    var testResult: Result<Unit> = Result.success(Unit)
-
+private class FakeChatProvider : ChatProvider {
     override val id: String = "fake"
     override val capabilities = ProviderCapabilities(
         streaming = true,
@@ -403,16 +348,13 @@ private class FakeProvider : ChatProvider {
     override fun stream(request: ChatRequest): Flow<GenerationEvent> =
         flowOf(GenerationEvent.Completed)
 
-    override suspend fun testConnection(config: ProviderConfig): Result<Unit> {
-        lastTestedConfig = config
-        return testResult
-    }
+    override suspend fun testConnection(config: ProviderConfig): Result<Unit> =
+        Result.success(Unit)
 }
 
-private class FakeConversationStore : ChatConversationStore {
+private class FakeChatConversationStore : ChatConversationStore {
     private val messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     var seedCalls = 0
-    var clearCalls = 0
     var appendCalls = 0
     var seedGate: CompletableDeferred<Unit>? = null
 
@@ -468,7 +410,6 @@ private class FakeConversationStore : ChatConversationStore {
         messages.value
 
     override suspend fun clearMessages(conversationId: String) {
-        clearCalls += 1
         messages.value = emptyList()
     }
 }

@@ -1,6 +1,9 @@
 package com.xinyu.companion.ui.memory
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -12,12 +15,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
@@ -37,7 +37,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -63,8 +62,10 @@ import com.xinyu.companion.domain.memory.MemorySensitivity
 import com.xinyu.companion.domain.memory.MemorySourceKind
 import com.xinyu.companion.domain.memory.MemoryStatus
 import com.xinyu.companion.ui.components.ActionSheet
-import com.xinyu.companion.ui.theme.Coral
-import com.xinyu.companion.ui.theme.Sage
+import com.xinyu.companion.ui.components.NoticeBanner
+import com.xinyu.companion.ui.components.NoticeTone
+import com.xinyu.companion.ui.components.SurfaceCard
+import com.xinyu.companion.ui.components.ToggleRow
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -96,8 +97,8 @@ fun MemoryScreen(
     val counts = MemorySection.entries.associateWith { section ->
         state.memories.count { memorySection(it, now) == section }
     }
-    val visibleMemories = state.memories
-        .filter { memorySection(it, now) == selectedSection }
+    val visibleMemories = state.memories.filter { memorySection(it, now) == selectedSection }
+
     LaunchedEffect(counts[MemorySection.PENDING], counts[MemorySection.ACTIVE]) {
         if (!sectionChosenByUser && (counts[MemorySection.PENDING] ?: 0) == 0) {
             selectedSection = when {
@@ -147,22 +148,10 @@ fun MemoryScreen(
             }
             if (state.message != null || state.error != null) {
                 item {
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (state.error == null) {
-                                Sage.copy(alpha = 0.12f)
-                            } else {
-                                MaterialTheme.colorScheme.error.copy(alpha = 0.1f)
-                            },
-                        ),
-                        shape = RoundedCornerShape(18.dp),
-                    ) {
-                        Text(
-                            state.error ?: state.message.orEmpty(),
-                            modifier = Modifier.padding(14.dp),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
+                    NoticeBanner(
+                        text = state.error ?: state.message.orEmpty(),
+                        tone = if (state.error != null) NoticeTone.ERROR else NoticeTone.SUCCESS,
+                    )
                 }
             }
             state.latestSummary?.let { summary ->
@@ -198,9 +187,7 @@ fun MemoryScreen(
                                         sectionChosenByUser = true
                                         selectedSection = section
                                     },
-                                    label = {
-                                        Text("${section.label} ${counts[section] ?: 0}")
-                                    },
+                                    label = { Text("${section.label} ${counts[section] ?: 0}") },
                                 )
                             }
                         }
@@ -213,9 +200,7 @@ fun MemoryScreen(
                 }
             }
             if (visibleMemories.isEmpty()) {
-                item {
-                    EmptyMemoryCard(selectedSection)
-                }
+                item { EmptyMemoryCard(selectedSection) }
             } else {
                 items(visibleMemories, key = LongTermMemory::id) { memory ->
                     MemoryCard(
@@ -328,29 +313,18 @@ private fun MemoryControlCard(
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
         ),
-        shape = RoundedCornerShape(24.dp),
+        shape = MaterialTheme.shapes.extraLarge,
     ) {
         Column(Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Outlined.Psychology, contentDescription = null, tint = Coral)
-                Spacer(Modifier.size(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("自动记忆", fontWeight = FontWeight.SemiBold)
-                    Text(
-                        "空闲时整理最近对话，会产生额外 API 调用",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(
-                    checked = state.autoMemoryEnabled,
-                    onCheckedChange = onAutoMemoryChange,
-                )
-            }
+            ToggleRow(
+                icon = Icons.Outlined.Psychology,
+                title = "自动记忆",
+                subtitle = "空闲时整理最近对话，会产生额外 API 调用",
+                checked = state.autoMemoryEnabled,
+                onCheckedChange = onAutoMemoryChange,
+            )
             Spacer(Modifier.height(12.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -366,6 +340,7 @@ private fun MemoryControlCard(
                         CircularProgressIndicator(
                             modifier = Modifier.size(16.dp),
                             strokeWidth = 1.5.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
                         )
                         Spacer(Modifier.size(8.dp))
                         Text("整理中…")
@@ -408,61 +383,58 @@ private fun MemoryCard(
     onReject: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    Card(
+    SurfaceCard(
         modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(20.dp),
+        contentPadding = PaddingValues(15.dp),
     ) {
-        Column(Modifier.padding(15.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    kindLabel(memory.kind),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = Coral,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Spacer(Modifier.weight(1f))
-                Text(
-                    statusLabel(memory, now),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                memory.statement,
-                modifier = Modifier.padding(top = 7.dp),
-                style = MaterialTheme.typography.bodyMedium,
+                kindLabel(memory.kind),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
             )
+            Spacer(Modifier.weight(1f))
             Text(
-                sourceLabel(memory),
-                modifier = Modifier.padding(top = 6.dp),
+                statusLabel(memory, now),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            validUntilLabel(memory)?.let { label ->
-                Text(
-                    label,
-                    modifier = Modifier.padding(top = 3.dp),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
+        }
+        Text(
+            memory.statement,
+            modifier = Modifier.padding(top = 7.dp),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            sourceLabel(memory),
+            modifier = Modifier.padding(top = 6.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        validUntilLabel(memory)?.let { label ->
+            Text(
+                label,
+                modifier = Modifier.padding(top = 3.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            if (memory.status == MemoryStatus.CANDIDATE &&
+                memory.confirmationState != MemoryConfirmationState.REJECTED
             ) {
-                if (memory.status == MemoryStatus.CANDIDATE &&
-                    memory.confirmationState != MemoryConfirmationState.REJECTED
-                ) {
-                    TextButton(onClick = onReject) { Text("拒绝") }
-                    TextButton(onClick = onConfirm) { Text("确认") }
-                }
-                IconButton(onClick = onEdit) {
-                    Icon(Icons.Outlined.Edit, contentDescription = "修改记忆")
-                }
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Outlined.DeleteOutline, contentDescription = "删除记忆")
-                }
+                TextButton(onClick = onReject) { Text("拒绝") }
+                TextButton(onClick = onConfirm) { Text("确认") }
+            }
+            IconButton(onClick = onEdit) {
+                Icon(Icons.Outlined.Edit, contentDescription = "修改记忆")
+            }
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Outlined.DeleteOutline, contentDescription = "删除记忆")
             }
         }
     }
@@ -475,37 +447,30 @@ private fun SummaryCard(
     content: String,
 ) {
     var expanded by remember(content) { mutableStateOf(false) }
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
-        shape = RoundedCornerShape(22.dp),
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            Text(
-                title,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                range,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 3.dp, bottom = 8.dp),
-            )
-            Text(
-                content,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = if (expanded) Int.MAX_VALUE else 4,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (content.length > 120 || content.lineSequence().count() > 4) {
-                TextButton(
-                    onClick = { expanded = !expanded },
-                    modifier = Modifier.align(Alignment.End),
-                ) {
-                    Text(if (expanded) "收起" else "展开")
-                }
+    SurfaceCard(modifier = Modifier.animateContentSize()) {
+        Text(
+            title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            range,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 3.dp, bottom = 8.dp),
+        )
+        Text(
+            content,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = if (expanded) Int.MAX_VALUE else 4,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (content.length > 120 || content.lineSequence().count() > 4) {
+            TextButton(
+                onClick = { expanded = !expanded },
+                modifier = Modifier.align(Alignment.End),
+            ) {
+                Text(if (expanded) "收起" else "展开")
             }
         }
     }
@@ -513,21 +478,19 @@ private fun SummaryCard(
 
 @Composable
 private fun EmptyMemoryCard(section: MemorySection) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-        ),
-        shape = RoundedCornerShape(22.dp),
+    SurfaceCard(
+        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+        elevation = 0.dp,
+        border = null,
+        contentPadding = PaddingValues(18.dp),
     ) {
-        Column(Modifier.padding(18.dp)) {
-            Text(section.emptyTitle, fontWeight = FontWeight.SemiBold)
-            Text(
-                section.emptyHint,
-                modifier = Modifier.padding(top = 6.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        Text(section.emptyTitle, fontWeight = FontWeight.SemiBold)
+        Text(
+            section.emptyHint,
+            modifier = Modifier.padding(top = 6.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -555,21 +518,21 @@ private fun MemoryEditorDialog(
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     options.take(2).forEach { option ->
-                        MemoryKindChip(
-                            option = option,
+                        FilterChip(
                             selected = kind == option,
-                            enabled = kindEditable,
                             onClick = { kind = option },
+                            label = { Text(kindLabel(option)) },
+                            enabled = kindEditable,
                         )
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     options.drop(2).forEach { option ->
-                        MemoryKindChip(
-                            option = option,
+                        FilterChip(
                             selected = kind == option,
-                            enabled = kindEditable,
                             onClick = { kind = option },
+                            label = { Text(kindLabel(option)) },
+                            enabled = kindEditable,
                         )
                     }
                 }
@@ -594,21 +557,6 @@ private fun MemoryEditorDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("取消") }
         },
-    )
-}
-
-@Composable
-private fun MemoryKindChip(
-    option: MemoryKind,
-    selected: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit,
-) {
-    FilterChip(
-        selected = selected,
-        onClick = onClick,
-        label = { Text(kindLabel(option)) },
-        enabled = enabled,
     )
 }
 
@@ -641,14 +589,11 @@ private fun sourceLabel(memory: LongTermMemory): String {
         MemorySourceKind.INFERRED -> "AI 推测"
         MemorySourceKind.MANUAL -> "手动添加"
     }
-    val date = isoDate(memory.observedAt)
-    return "$source · $date"
+    return "$source · ${isoDate(memory.observedAt)}"
 }
 
 private fun rangeLabel(start: Long, end: Long): String =
-    isoDate(start) +
-        " – " +
-        isoDate(end)
+    "${isoDate(start)} – ${isoDate(end)}"
 
 private fun validUntilLabel(memory: LongTermMemory): String? =
     memory.validTo?.let { "有效至 ${isoDate(it)}" }
@@ -715,4 +660,3 @@ private fun memorySection(memory: LongTermMemory, now: Long): MemorySection {
         else -> MemorySection.ARCHIVED
     }
 }
-

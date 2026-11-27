@@ -1,8 +1,6 @@
 package com.xinyu.companion.ui.reminder
 
 import android.Manifest
-import android.app.DatePickerDialog
-import android.app.TimePickerDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -15,17 +13,18 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -33,10 +32,11 @@ import androidx.compose.material.icons.outlined.AccessTime
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Event
 import androidx.compose.material.icons.outlined.NotificationsActive
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,8 +47,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -70,14 +73,32 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.xinyu.companion.data.reminder.ReminderNotifications
 import com.xinyu.companion.domain.reminder.ReminderPolicy
 import com.xinyu.companion.domain.reminder.ReminderRule
-import com.xinyu.companion.ui.theme.Coral
-import com.xinyu.companion.ui.theme.Sage
+import com.xinyu.companion.ui.components.IntroHeroCard
+import com.xinyu.companion.ui.components.NoticeBanner
+import com.xinyu.companion.ui.components.NoticeTone
+import com.xinyu.companion.ui.components.SurfaceCard
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+
+internal object ReminderDateTimeMapper {
+    fun localDateToPickerUtcMillis(date: LocalDate): Long =
+        date.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+
+    fun pickerUtcMillisToLocalDate(utcMillis: Long): LocalDate =
+        Instant.ofEpochMilli(utcMillis).atZone(ZoneOffset.UTC).toLocalDate()
+
+    fun combineLocalDateTime(
+        date: LocalDate,
+        hour: Int,
+        minute: Int,
+        zoneId: ZoneId = ZoneId.systemDefault(),
+    ): Long = date.atTime(hour, minute).atZone(zoneId).toInstant().toEpochMilli()
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -118,24 +139,17 @@ fun ReminderScreen(
             .withNano(0)
     }
     var message by rememberSaveable { mutableStateOf("") }
-    var selectedDateMillis by rememberSaveable {
-        mutableLongStateOf(
-            initial.toLocalDate().atStartOfDay(ZoneId.systemDefault())
-                .toInstant().toEpochMilli(),
-        )
+    var selectedDateUtcMillis by rememberSaveable {
+        mutableLongStateOf(ReminderDateTimeMapper.localDateToPickerUtcMillis(initial.toLocalDate()))
     }
     var hour by rememberSaveable { mutableIntStateOf(initial.hour) }
     var minute by rememberSaveable { mutableIntStateOf(initial.minute) }
     var validationError by rememberSaveable { mutableStateOf<String?>(null) }
+    var showDatePicker by rememberSaveable { mutableStateOf(false) }
+    var showTimePicker by rememberSaveable { mutableStateOf(false) }
 
-    val selectedDate = Instant.ofEpochMilli(selectedDateMillis)
-        .atZone(ZoneId.systemDefault())
-        .toLocalDate()
-    val selectedEpochMillis = selectedDate
-        .atTime(hour, minute)
-        .atZone(ZoneId.systemDefault())
-        .toInstant()
-        .toEpochMilli()
+    val selectedDate = ReminderDateTimeMapper.pickerUtcMillisToLocalDate(selectedDateUtcMillis)
+    val selectedEpochMillis = ReminderDateTimeMapper.combineLocalDateTime(selectedDate, hour, minute)
 
     fun enableNotifications() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -190,66 +204,36 @@ fun ReminderScreen(
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
                 .navigationBarsPadding()
+                .imePadding()
                 .padding(horizontal = 18.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.62f),
-                ),
-                shape = RoundedCornerShape(24.dp),
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text(
-                        "把时间交给规则，到点让林叫你",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        "提醒文字加密保存在本机，不上传。到点由 Android 发出系统通知；省电模式下可能晚几分钟。",
-                        modifier = Modifier.padding(top = 7.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+            IntroHeroCard(
+                title = "把时间交给规则，到点让${state.companionName}叫你",
+                body = "提醒文字加密保存在本机，不上传。到点由 Android 发出系统通知；省电模式下可能晚几分钟。",
+            )
 
             if (!notificationsEnabled) {
                 Surface(
-                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f),
-                    shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.72f),
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    shape = MaterialTheme.shapes.medium,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            "系统通知还没有开启",
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                        )
+                        Text("系统通知还没有开启", fontWeight = FontWeight.SemiBold)
                         Text(
                             "不开通知，言语就无法在后台发出系统提醒。",
                             modifier = Modifier.padding(top = 4.dp),
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
                         )
-                        TextButton(onClick = ::enableNotifications) {
-                            Text("开启通知")
-                        }
+                        TextButton(onClick = ::enableNotifications) { Text("开启通知") }
                     }
                 }
             }
 
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                ),
-                shape = RoundedCornerShape(22.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-            ) {
-                Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
+            SurfaceCard(contentPadding = PaddingValues(18.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(9.dp),
@@ -262,7 +246,7 @@ fun ReminderScreen(
                                 Icons.Outlined.NotificationsActive,
                                 contentDescription = null,
                                 modifier = Modifier.padding(8.dp),
-                                tint = Coral,
+                                tint = MaterialTheme.colorScheme.primary,
                             )
                         }
                         Column {
@@ -296,21 +280,7 @@ fun ReminderScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         OutlinedButton(
-                            onClick = {
-                                DatePickerDialog(
-                                    context,
-                                    { _, year, month, day ->
-                                        selectedDateMillis = LocalDate.of(year, month + 1, day)
-                                            .atStartOfDay(ZoneId.systemDefault())
-                                            .toInstant()
-                                            .toEpochMilli()
-                                        validationError = null
-                                    },
-                                    selectedDate.year,
-                                    selectedDate.monthValue - 1,
-                                    selectedDate.dayOfMonth,
-                                ).show()
-                            },
+                            onClick = { showDatePicker = true },
                             modifier = Modifier.weight(1f),
                         ) {
                             Icon(Icons.Outlined.Event, contentDescription = null)
@@ -318,19 +288,7 @@ fun ReminderScreen(
                             Text(formatDate(selectedDate))
                         }
                         OutlinedButton(
-                            onClick = {
-                                TimePickerDialog(
-                                    context,
-                                    { _, selectedHour, selectedMinute ->
-                                        hour = selectedHour
-                                        minute = selectedMinute
-                                        validationError = null
-                                    },
-                                    hour,
-                                    minute,
-                                    true,
-                                ).show()
-                            },
+                            onClick = { showTimePicker = true },
                             modifier = Modifier.weight(1f),
                         ) {
                             Icon(Icons.Outlined.AccessTime, contentDescription = null)
@@ -367,7 +325,13 @@ fun ReminderScreen(
                 }
             }
 
-            ReminderFeedback(state)
+            val feedback = state.error ?: state.message
+            AnimatedVisibility(visible = feedback != null) {
+                NoticeBanner(
+                    text = feedback.orEmpty(),
+                    tone = if (state.error != null) NoticeTone.ERROR else NoticeTone.SUCCESS,
+                )
+            }
 
             Text(
                 "待处理",
@@ -385,14 +349,13 @@ fun ReminderScreen(
                     CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
                 }
             } else if (state.rules.isEmpty()) {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                    shape = RoundedCornerShape(18.dp),
-                    modifier = Modifier.fillMaxWidth(),
+                SurfaceCard(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    elevation = 0.dp,
+                    border = null,
                 ) {
                     Text(
                         "还没有提醒。它不会根据身份或习惯替你猜一个时间。",
-                        modifier = Modifier.padding(16.dp),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -408,28 +371,60 @@ fun ReminderScreen(
             }
         }
     }
-}
 
-@Composable
-private fun ReminderFeedback(state: ReminderUiState) {
-    val feedback = state.error ?: state.message
-    AnimatedVisibility(visible = feedback != null) {
-        Surface(
-            color = if (state.error == null) {
-                Sage.copy(alpha = 0.12f)
-            } else {
-                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)
+    if (showDatePicker) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = selectedDateUtcMillis,
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let {
+                            selectedDateUtcMillis = it
+                            validationError = null
+                        }
+                        showDatePicker = false
+                    },
+                ) {
+                    Text("确定")
+                }
             },
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier.fillMaxWidth(),
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("取消") }
+            },
         ) {
-            Text(
-                feedback.orEmpty(),
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = if (state.error == null) Sage else MaterialTheme.colorScheme.onErrorContainer,
-            )
+            DatePicker(state = datePickerState)
         }
+    }
+
+    if (showTimePicker) {
+        val timePickerState = rememberTimePickerState(
+            initialHour = hour,
+            initialMinute = minute,
+            is24Hour = true,
+        )
+        AlertDialog(
+            onDismissRequest = { showTimePicker = false },
+            title = { Text("选择提醒时间") },
+            text = { TimePicker(state = timePickerState) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        hour = timePickerState.hour
+                        minute = timePickerState.minute
+                        validationError = null
+                        showTimePicker = false
+                    },
+                ) {
+                    Text("确定")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTimePicker = false }) { Text("取消") }
+            },
+        )
     }
 }
 
@@ -439,20 +434,15 @@ private fun ReminderRuleCard(
     overdue: Boolean,
     onCancel: () -> Unit,
 ) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = if (overdue) {
-                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f)
-            } else {
-                MaterialTheme.colorScheme.surface
-            },
-        ),
-        shape = RoundedCornerShape(20.dp),
+    SurfaceCard(
+        containerColor = if (overdue) {
+            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f)
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -460,7 +450,8 @@ private fun ReminderRuleCard(
                 modifier = Modifier
                     .size(9.dp)
                     .background(
-                        if (overdue) MaterialTheme.colorScheme.error else Coral,
+                        if (overdue) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.primary,
                         CircleShape,
                     ),
             )

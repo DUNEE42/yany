@@ -1,7 +1,7 @@
 package com.xinyu.companion.ui.chat
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -42,10 +42,9 @@ import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -68,35 +67,38 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.xinyu.companion.domain.ChatMessage
 import com.xinyu.companion.domain.MessageRole
 import com.xinyu.companion.domain.MessageStatus
 import com.xinyu.companion.ui.components.ActionSheet
-import com.xinyu.companion.ui.theme.Coral
-import com.xinyu.companion.ui.theme.CoralSoft
-import com.xinyu.companion.ui.theme.Sage
+import com.xinyu.companion.ui.components.CompanionAvatar
+import com.xinyu.companion.ui.components.IntroHeroCard
+import com.xinyu.companion.ui.components.MarkdownMessageText
+import com.xinyu.companion.ui.components.StatusPill
+import com.xinyu.companion.ui.components.StatusTone
+import com.xinyu.companion.ui.components.SubtleThinkingIndicator
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
 fun ChatScreen(
     state: ChatUiState,
-    companionName: String,
+    companionName: String = state.companionName,
     onInputChange: (String) -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
     onRetry: () -> Unit,
     onOpenSettings: () -> Unit,
+    companionAvatarPath: String? = state.companionAvatarPath,
     onSearchQueryChange: (String) -> Unit = {},
     onConfirmSearch: () -> Unit = {},
     onSendWithoutSearch: () -> Unit = {},
@@ -134,15 +136,14 @@ fun ChatScreen(
         }
     }
     LaunchedEffect(listState) {
-        androidx.compose.runtime.snapshotFlow {
-            listState.isScrollInProgress to nearBottom
-        }.collect { (scrolling, atBottom) ->
-            if (scrolling && !atBottom) {
-                autoFollow = false
-            } else if (!scrolling) {
-                autoFollow = atBottom
+        snapshotFlow { listState.isScrollInProgress to nearBottom }
+            .collect { (scrolling, atBottom) ->
+                if (scrolling && !atBottom) {
+                    autoFollow = false
+                } else if (!scrolling) {
+                    autoFollow = atBottom
+                }
             }
-        }
     }
     LaunchedEffect(Unit) {
         delay(2 * 60 * 60 * 1000L)
@@ -154,6 +155,7 @@ fun ChatScreen(
         topBar = {
             CompanionHeader(
                 companionName = companionName,
+                companionAvatarPath = companionAvatarPath,
                 hasApiKey = state.hasApiKey,
                 onOpenSettings = onOpenSettings,
             )
@@ -179,34 +181,19 @@ fun ChatScreen(
                     enter = fadeIn(tween(120)),
                     exit = fadeOut(tween(100)),
                 ) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
-                        shape = RoundedCornerShape(50),
+                    StatusPill(
+                        label = state.liveContextLabel.orEmpty(),
+                        tone = StatusTone.ACCENT,
+                        icon = Icons.Outlined.AutoAwesome,
                         modifier = Modifier.padding(bottom = 8.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                Icons.Outlined.AutoAwesome,
-                                contentDescription = null,
-                                modifier = Modifier.size(13.dp),
-                                tint = Coral,
-                            )
-                            Spacer(Modifier.width(5.dp))
-                            Text(
-                                state.liveContextLabel.orEmpty(),
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                        }
-                    }
+                    )
                 }
                 if (state.safetyLevel == "crisis") {
                     CrisisCard()
                     Spacer(Modifier.height(8.dp))
                 }
                 Composer(
+                    companionName = companionName,
                     input = state.input,
                     isStreaming = state.isStreaming,
                     canSend = state.hasApiKey && state.isConversationReady,
@@ -240,12 +227,19 @@ fun ChatScreen(
             ) {
                 if (visibleMessages.isEmpty()) {
                     item {
-                        IntroCard(companionName)
+                        IntroHeroCard(
+                            title = "只属于你的日常",
+                            body = "$companionName 是 AI 角色，不是真人。聊天和记忆加密保存在这台手机上；聊天请求以及开启自动记忆后的整理批次会发送到 DeepSeek。",
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                            contentColor = MaterialTheme.colorScheme.onSurface,
+                        )
                     }
                 }
                 items(visibleMessages, key = { it.id }) { message ->
                     MessageBubble(
                         message = message,
+                        companionName = companionName,
+                        companionAvatarPath = companionAvatarPath,
                         modifier = Modifier.animateItem(),
                     )
                 }
@@ -325,6 +319,7 @@ private fun SearchConfirmationSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.extraLarge,
     ) {
         Column(
             modifier = Modifier
@@ -390,6 +385,7 @@ private fun SearchConfirmationSheet(
 @Composable
 private fun CompanionHeader(
     companionName: String,
+    companionAvatarPath: String?,
     hasApiKey: Boolean,
     onOpenSettings: () -> Unit,
 ) {
@@ -404,19 +400,12 @@ private fun CompanionHeader(
                 .padding(horizontal = 18.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.linearGradient(
-                            listOf(CoralSoft, Coral, Sage.copy(alpha = 0.8f)),
-                        ),
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("屿", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 19.sp)
-            }
+            CompanionAvatar(
+                name = companionName,
+                avatarPath = companionAvatarPath,
+                size = 44.dp,
+                prominent = true,
+            )
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -424,25 +413,15 @@ private fun CompanionHeader(
                         companionName,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Spacer(Modifier.width(8.dp))
-                    Surface(
-                        shape = RoundedCornerShape(50),
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                Icons.Outlined.AutoAwesome,
-                                contentDescription = null,
-                                modifier = Modifier.size(12.dp),
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text("AI", style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
+                    StatusPill(
+                        label = "AI",
+                        tone = StatusTone.ACCENT,
+                        icon = Icons.Outlined.AutoAwesome,
+                    )
                 }
                 Text(
                     if (hasApiKey) {
@@ -464,32 +443,10 @@ private fun CompanionHeader(
 }
 
 @Composable
-private fun IntroCard(companionName: String) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
-        ),
-        shape = RoundedCornerShape(22.dp),
-    ) {
-        Column(modifier = Modifier.padding(18.dp)) {
-            Text(
-                "只属于你的日常",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "$companionName 是 AI 角色，不是真人。聊天和记忆加密保存在这台手机上；聊天请求以及开启自动记忆后的整理批次会发送到 DeepSeek。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
 private fun MessageBubble(
     message: ChatMessage,
+    companionName: String,
+    companionAvatarPath: String?,
     modifier: Modifier = Modifier,
 ) {
     val isUser = message.role == MessageRole.USER
@@ -499,15 +456,12 @@ private fun MessageBubble(
         verticalAlignment = Alignment.Bottom,
     ) {
         if (!isUser) {
-            Box(
-                modifier = Modifier
-                    .size(28.dp)
-                    .clip(CircleShape)
-                    .background(CoralSoft),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("屿", fontSize = 11.sp, color = Coral, fontWeight = FontWeight.Bold)
-            }
+            CompanionAvatar(
+                name = companionName,
+                avatarPath = companionAvatarPath,
+                size = 28.dp,
+                prominent = false,
+            )
             Spacer(Modifier.width(8.dp))
         }
         Surface(
@@ -533,14 +487,7 @@ private fun MessageBubble(
                 Column(modifier = Modifier.padding(horizontal = 15.dp, vertical = 11.dp)) {
                     when {
                         message.content.isBlank() && message.status == MessageStatus.STREAMING -> {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(14.dp),
-                                    strokeWidth = 1.5.dp,
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text("正在想怎么说…", style = MaterialTheme.typography.bodyMedium)
-                            }
+                            SubtleThinkingIndicator(label = "正在想怎么说…")
                         }
                         message.content.isBlank() && message.status == MessageStatus.FAILED -> {
                             Text(
@@ -549,11 +496,16 @@ private fun MessageBubble(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        else -> {
+                        isUser -> {
                             Text(
                                 text = message.content,
                                 style = MaterialTheme.typography.bodyLarge,
-                                lineHeight = 24.sp,
+                            )
+                        }
+                        else -> {
+                            MarkdownMessageText(
+                                text = message.content,
+                                isUserMessage = false,
                             )
                         }
                     }
@@ -573,6 +525,7 @@ private fun MessageBubble(
 
 @Composable
 private fun Composer(
+    companionName: String,
     input: String,
     isStreaming: Boolean,
     canSend: Boolean,
@@ -586,14 +539,14 @@ private fun Composer(
     val actionColor by animateColorAsState(
         targetValue = when {
             isStreaming -> MaterialTheme.colorScheme.surfaceVariant
-            sendEnabled -> Coral
+            sendEnabled -> MaterialTheme.colorScheme.primary
             else -> MaterialTheme.colorScheme.surfaceVariant
         },
         animationSpec = tween(durationMillis = 180),
         label = "composer-action-color",
     )
     Surface(
-        shape = RoundedCornerShape(24.dp),
+        shape = MaterialTheme.shapes.extraLarge,
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 2.dp,
         modifier = Modifier.fillMaxWidth(),
@@ -611,7 +564,7 @@ private fun Composer(
                         when {
                             !hasApiKey -> "请先完成连接"
                             !isConversationReady -> "正在准备本地聊天…"
-                            else -> "和林说点什么"
+                            else -> "和${companionName}说点什么"
                         },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -658,7 +611,7 @@ private fun Composer(
                         contentDescription = if (streaming) "停止生成" else "发送",
                         tint = when {
                             streaming -> MaterialTheme.colorScheme.onSurfaceVariant
-                            sendEnabled -> Color.White
+                            sendEnabled -> MaterialTheme.colorScheme.onPrimary
                             else -> MaterialTheme.colorScheme.onSurfaceVariant
                         },
                     )
@@ -676,9 +629,10 @@ private fun ErrorCard(
 ) {
     Card(
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.09f),
+            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.78f),
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
         ),
-        shape = RoundedCornerShape(16.dp),
+        shape = MaterialTheme.shapes.medium,
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 8.dp),
@@ -687,7 +641,11 @@ private fun ErrorCard(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Outlined.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+            Icon(
+                Icons.Outlined.Close,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+            )
             Spacer(Modifier.width(8.dp))
             Text(
                 message,
@@ -714,8 +672,9 @@ private fun CrisisCard() {
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
         ),
-        shape = RoundedCornerShape(18.dp),
+        shape = MaterialTheme.shapes.medium,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(modifier = Modifier.padding(14.dp)) {

@@ -242,6 +242,20 @@ object AppModule {
 
     @Provides
     @Singleton
+    fun provideCompanionProfileStore(
+        @ApplicationContext context: Context,
+    ): com.xinyu.companion.domain.settings.CompanionProfileStore =
+        com.xinyu.companion.data.settings.SharedPreferencesCompanionProfileStore(context)
+
+    @Provides
+    @Singleton
+    fun provideCompanionAvatarStorage(
+        @ApplicationContext context: Context,
+    ): com.xinyu.companion.data.settings.CompanionAvatarStorage =
+        com.xinyu.companion.data.settings.LocalCompanionAvatarStorage(context)
+
+    @Provides
+    @Singleton
     fun provideContextAssembler(): ContextAssembler = ContextAssembler()
 
     @Provides
