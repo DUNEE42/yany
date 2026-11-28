@@ -90,4 +90,49 @@ class DeepSeekStreamParserTest {
     fun `null non streaming choice returns no fallback`() {
         assertThat(parser.parseNonStreaming("""{"choices":[null]}""")).isNull()
     }
+
+    @Test
+    fun `parses streaming tool call deltas including parallel calls`() {
+        val events = parser.parseEvents(
+            """
+            {
+              "choices": [{
+                "delta": {
+                  "tool_calls": [
+                    {"index": 0, "id": "call_a", "type": "function", "function": {"name": "get_weather", "arguments": "{\"city\":\"苏州\"}"}},
+                    {"index": 1, "id": "call_b", "type": "function", "function": {"name": "search_memories", "arguments": "{\"query\":\"咖啡\"}"}}
+                  ]
+                }
+              }]
+            }
+            """.trimIndent(),
+        )
+
+        assertThat(events).containsExactly(
+            GenerationEvent.ToolCallDelta(0, "call_a", "get_weather", """{"city":"苏州"}"""),
+            GenerationEvent.ToolCallDelta(1, "call_b", "search_memories", """{"query":"咖啡"}"""),
+        ).inOrder()
+    }
+
+    @Test
+    fun `parses non streaming tool calls fallback`() {
+        val events = parser.parseNonStreamingEvents(
+            """
+            {
+              "choices": [{
+                "message": {
+                  "content": "",
+                  "tool_calls": [
+                    {"id": "call_1", "type": "function", "function": {"name": "get_weather", "arguments": "{\"city\":\"南京\"}"}}
+                  ]
+                }
+              }]
+            }
+            """.trimIndent(),
+        )
+
+        assertThat(events).containsExactly(
+            GenerationEvent.ToolCallDelta(0, "call_1", "get_weather", """{"city":"南京"}"""),
+        )
+    }
 }

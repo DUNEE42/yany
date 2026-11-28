@@ -3,6 +3,7 @@ package com.xinyu.companion.domain.provider
 import com.xinyu.companion.domain.ContextTurn
 import com.xinyu.companion.domain.ConversationStyle
 import com.xinyu.companion.domain.GenerationEvent
+import com.xinyu.companion.domain.ToolDefinition
 import kotlinx.coroutines.flow.Flow
 
 data class ProviderCapabilities(
@@ -17,6 +18,8 @@ data class ChatRequest(
     val config: ProviderConfig,
     val conversationStyle: ConversationStyle = ConversationStyle(),
     val maxOutputTokens: Int? = null,
+    val tools: List<ToolDefinition> = emptyList(),
+    val toolChoice: String? = null,
 )
 
 interface ChatProvider {
